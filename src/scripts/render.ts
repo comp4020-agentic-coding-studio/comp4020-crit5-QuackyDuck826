@@ -430,10 +430,18 @@ export function render(ctx: CanvasRenderingContext2D, state: GameState, size: nu
   drawPlanet(ctx, state, center, ringRadius * 0.32, ringAlpha);
 
   ctx.save();
-  ctx.shadowColor = rgba(COLORS.ring, ringAlpha * 0.5);
-  ctx.shadowBlur = size * 0.01;
-  ctx.strokeStyle = rgba(COLORS.ring, ringAlpha * 0.6);
-  ctx.lineWidth = Math.max(1, size * 0.002);
+  // A wide, faint band gives the path a soft glow-halo, then a thin line on
+  // top marks its exact radius — both kept low-contrast against the bg.
+  ctx.strokeStyle = rgba(COLORS.ring, ringAlpha * 0.08);
+  ctx.lineWidth = size * 0.022;
+  ctx.beginPath();
+  ctx.arc(center, center, ringRadius, 0, Math.PI * 2);
+  ctx.stroke();
+
+  ctx.shadowColor = rgba(COLORS.ring, ringAlpha * 0.25);
+  ctx.shadowBlur = size * 0.008;
+  ctx.strokeStyle = rgba(COLORS.ring, ringAlpha * 0.3);
+  ctx.lineWidth = Math.max(1, size * 0.0016);
   ctx.beginPath();
   ctx.arc(center, center, ringRadius, 0, Math.PI * 2);
   ctx.stroke();
