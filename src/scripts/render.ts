@@ -22,9 +22,6 @@ const COLORS = {
   player: [123, 232, 255] as Rgb,
   danger: [255, 106, 61] as Rgb,
   score: [200, 230, 255] as Rgb,
-  planetCore: [90, 170, 230] as Rgb,
-  planetEdge: [8, 12, 26] as Rgb,
-  star: [200, 225, 255] as Rgb,
   closeCall: [110, 255, 210] as Rgb,
   lastSecond: [255, 221, 90] as Rgb,
 };
@@ -39,6 +36,23 @@ function clamp(value: number, min: number, max: number): number {
 
 function lerp(a: number, b: number, t: number): number {
   return a + (b - a) * t;
+}
+
+function hslToRgb(h: number, s: number, l: number): Rgb {
+  const hue = ((h % 360) + 360) % 360;
+  const c = (1 - Math.abs(2 * l - 1)) * s;
+  const x = c * (1 - Math.abs(((hue / 60) % 2) - 1));
+  const m = l - c / 2;
+  let r = 0;
+  let g = 0;
+  let b = 0;
+  if (hue < 60) [r, g, b] = [c, x, 0];
+  else if (hue < 120) [r, g, b] = [x, c, 0];
+  else if (hue < 180) [r, g, b] = [0, c, x];
+  else if (hue < 240) [r, g, b] = [0, x, c];
+  else if (hue < 300) [r, g, b] = [x, 0, c];
+  else [r, g, b] = [c, 0, x];
+  return [Math.round((r + m) * 255), Math.round((g + m) * 255), Math.round((b + m) * 255)];
 }
 
 // A hazard is born red, ages through orange into yellow over its lifetime,
@@ -98,8 +112,9 @@ function drawStars(ctx: CanvasRenderingContext2D, state: GameState, size: number
   for (let i = 0; i < STAR_COUNT; i++) {
     const fx = hash(i * 1.618);
     const fy = hash(i * 2.718 + 4.2);
+    const hue = hash(i * 3.14) * 360;
     const twinkle = 0.5 + 0.5 * Math.sin(state.time * (0.5 + fx) + i * 3.1);
-    ctx.fillStyle = rgba(COLORS.star, 0.12 + twinkle * 0.35);
+    ctx.fillStyle = rgba(hslToRgb(hue, 0.45, 0.82), 0.12 + twinkle * 0.35);
     ctx.beginPath();
     ctx.arc(fx * size, fy * size, size * (0.0012 + fy * 0.0022), 0, Math.PI * 2);
     ctx.fill();
@@ -109,9 +124,12 @@ function drawStars(ctx: CanvasRenderingContext2D, state: GameState, size: number
 // What everything else orbits: a shaded core whose own boundary and inner
 // contours warp continuously (two overlapping sine waves per layer, phase
 // driven by state.time) — a liquid ripple across the surface itself, not a
-// pulse of rings expanding outward.
+// pulse of rings expanding outward. It also breathes (slow size oscillation)
+// and drifts through hues (slow color cycle) on top of that ripple texture.
 const PLANET_SEGMENTS = 72;
 const PLANET_RIPPLE_LAYERS = 3;
+const PLANET_BREATHE_PERIOD = 9;
+const PLANET_HUE_PERIOD = 45;
 
 function warpedRadiusAt(baseRadius: number, angle: number, time: number, phase: number): number {
   const w1 = Math.sin(angle * 3 + time * 1.1 + phase) * 0.06;
@@ -142,26 +160,36 @@ function drawPlanet(ctx: CanvasRenderingContext2D, state: GameState, center: num
   ctx.save();
   ctx.globalAlpha = alpha;
 
+  const breathe = 1 + 0.1 * Math.sin((state.time / PLANET_BREATHE_PERIOD) * Math.PI * 2);
+  const liveRadius = radius * breathe;
+  const hue = (state.time / PLANET_HUE_PERIOD) * 360;
+  const core = hslToRgb(hue, 0.6, 0.62);
+  const edge = hslToRgb(hue + 30, 0.55, 0.09);
+
+  ctx.shadowColor = rgba(core, 0.55);
+  ctx.shadowBlur = liveRadius * 0.4;
+
   const gradient = ctx.createRadialGradient(
-    center - radius * 0.35,
-    center - radius * 0.35,
-    radius * 0.05,
+    center - liveRadius * 0.35,
+    center - liveRadius * 0.35,
+    liveRadius * 0.05,
     center,
     center,
-    radius,
+    liveRadius,
   );
-  gradient.addColorStop(0, rgba(COLORS.planetCore, 1));
-  gradient.addColorStop(1, rgba(COLORS.planetEdge, 1));
+  gradient.addColorStop(0, rgba(core, 1));
+  gradient.addColorStop(1, rgba(edge, 1));
   ctx.fillStyle = gradient;
-  traceWarpedCircle(ctx, center, radius, state.time, 0);
+  traceWarpedCircle(ctx, center, liveRadius, state.time, 0);
   ctx.fill();
 
+  ctx.shadowBlur = 0;
   for (let i = 1; i <= PLANET_RIPPLE_LAYERS; i++) {
-    const layerRadius = radius * (1 - i * 0.24);
+    const layerRadius = liveRadius * (1 - i * 0.24);
     const phase = i * 1.9 + state.time * 0.35;
     traceWarpedCircle(ctx, center, layerRadius, state.time, phase);
     ctx.strokeStyle = rgba(COLORS.ring, 0.16);
-    ctx.lineWidth = Math.max(1, radius * 0.012);
+    ctx.lineWidth = Math.max(1, liveRadius * 0.012);
     ctx.stroke();
   }
 
@@ -357,8 +385,9 @@ function drawScore(ctx: CanvasRenderingContext2D, state: GameState, size: number
     roundedRect(ctx, chipX, chipY, chipW, chipH, chipH / 2);
     ctx.fill();
 
-    ctx.strokeStyle = rgba(COLORS.score, 0.22 + 0.18 * pulse);
-    ctx.lineWidth = Math.max(1, size * 0.0018);
+    const borderHue = state.time * 22;
+    ctx.strokeStyle = rgba(hslToRgb(borderHue, 0.65, 0.72), 0.3 + 0.25 * pulse);
+    ctx.lineWidth = Math.max(1, size * 0.0022);
     roundedRect(ctx, chipX, chipY, chipW, chipH, chipH / 2);
     ctx.stroke();
 
@@ -380,6 +409,13 @@ function drawScore(ctx: CanvasRenderingContext2D, state: GameState, size: number
   ctx.font = `700 ${Math.round(fontSize)}px system-ui, sans-serif`;
   ctx.fillText(String(Math.floor(state.score)), size / 2, size * 0.4);
   ctx.shadowBlur = 0;
+
+  const promptAlpha = clamp((elapsed - 0.9) / 0.4, 0, 1);
+  if (promptAlpha <= 0) return;
+  const promptPulse = 0.6 + 0.4 * Math.sin(state.time * 3);
+  ctx.font = `600 ${Math.round(size * 0.026)}px system-ui, sans-serif`;
+  ctx.fillStyle = rgba(COLORS.score, promptAlpha * (0.45 + 0.4 * promptPulse));
+  ctx.fillText("tap to try again", size / 2, size * 0.4 + fontSize * 0.9);
 }
 
 export function render(ctx: CanvasRenderingContext2D, state: GameState, size: number) {
