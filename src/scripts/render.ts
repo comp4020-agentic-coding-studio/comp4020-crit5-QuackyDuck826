@@ -131,10 +131,50 @@ const PLANET_RIPPLE_LAYERS = 3;
 const PLANET_BREATHE_PERIOD = 9;
 const PLANET_HUE_PERIOD = 45;
 
-function warpedRadiusAt(baseRadius: number, angle: number, time: number, phase: number): number {
-  const w1 = Math.sin(angle * 3 + time * 1.1 + phase) * 0.06;
-  const w2 = Math.sin(angle * 5 - time * 0.7 + phase * 1.4) * 0.03;
+function warpedRadiusAt(
+  baseRadius: number,
+  angle: number,
+  time: number,
+  phase: number,
+  ampScale = 1,
+  freqScale = 1,
+  speedScale = 1,
+): number {
+  // Snapping to a whole number of lobes around the circle keeps the shape a
+  // closed ring — a non-integer frequency would make angle 2π land on a
+  // different radius than angle 0, tearing the path open right where it
+  // closes (angle 0, the right side of the ring).
+  const lobes1 = Math.max(1, Math.round(3 * freqScale));
+  const lobes2 = Math.max(1, Math.round(5 * freqScale));
+  const w1 = Math.sin(angle * lobes1 + time * 1.1 * speedScale + phase) * 0.06 * ampScale;
+  const w2 = Math.sin(angle * lobes2 - time * 0.7 * speedScale + phase * 1.4) * 0.03 * ampScale;
   return baseRadius * (1 + w1 + w2);
+}
+
+// General warped-circle tracer, centered anywhere — the planet's surface,
+// the play ring, the ambient noodle rings, and effect bursts all reuse this
+// so every warp in the scene shares the same liquid-ripple language.
+function traceWarpedCircleAt(
+  ctx: CanvasRenderingContext2D,
+  cx: number,
+  cy: number,
+  baseRadius: number,
+  time: number,
+  phase: number,
+  ampScale = 1,
+  freqScale = 1,
+  speedScale = 1,
+) {
+  ctx.beginPath();
+  for (let i = 0; i <= PLANET_SEGMENTS; i++) {
+    const angle = (i / PLANET_SEGMENTS) * Math.PI * 2;
+    const r = warpedRadiusAt(baseRadius, angle, time, phase, ampScale, freqScale, speedScale);
+    const x = cx + r * Math.cos(angle);
+    const y = cy + r * Math.sin(angle);
+    if (i === 0) ctx.moveTo(x, y);
+    else ctx.lineTo(x, y);
+  }
+  ctx.closePath();
 }
 
 function traceWarpedCircle(
@@ -143,17 +183,11 @@ function traceWarpedCircle(
   baseRadius: number,
   time: number,
   phase: number,
+  ampScale = 1,
+  freqScale = 1,
+  speedScale = 1,
 ) {
-  ctx.beginPath();
-  for (let i = 0; i <= PLANET_SEGMENTS; i++) {
-    const angle = (i / PLANET_SEGMENTS) * Math.PI * 2;
-    const r = warpedRadiusAt(baseRadius, angle, time, phase);
-    const x = center + r * Math.cos(angle);
-    const y = center + r * Math.sin(angle);
-    if (i === 0) ctx.moveTo(x, y);
-    else ctx.lineTo(x, y);
-  }
-  ctx.closePath();
+  traceWarpedCircleAt(ctx, center, center, baseRadius, time, phase, ampScale, freqScale, speedScale);
 }
 
 function drawPlanet(ctx: CanvasRenderingContext2D, state: GameState, center: number, radius: number, alpha: number) {
@@ -196,6 +230,73 @@ function drawPlanet(ctx: CanvasRenderingContext2D, state: GameState, center: num
   ctx.restore();
 }
 
+// Ambient, thick, noodle-like rings warping in and out of the play area — one
+// tucked between the planet and the orbit path, two drifting past it toward
+// the canvas edge — sharing the planet's ripple language so the whole scene
+// reads as one living, wobbly thing rather than a rigid track with a blob in
+// the middle. Kept to just a few (fewer, bigger wobbles rather than a tangle
+// of thin curly ones) and each a distinctly different thickness, so they
+// read as a handful of fat cosmic noodles instead of clutter. Each ring
+// drifts through its own slow hue for a candy, many-colored feel.
+const NOODLE_HUE_PERIOD = 30;
+
+interface NoodleRing {
+  radiusFraction: number; // of ringRadius
+  widthFraction: number; // of ringRadius
+  ampScale: number;
+  freqScale: number;
+  speedScale: number;
+  phase: number;
+  hueOffset: number;
+  alpha: number;
+}
+
+// Each ring's max possible reach (radiusFraction * (1 + worst-case wobble) +
+// half its own width) is kept comfortably under ~1.39 — the distance from
+// center to the canvas edge, in ringRadius units, since the canvas is
+// always sized to the smaller viewport dimension — so no noodle gets
+// clipped by the screen edge.
+const NOODLE_RINGS: readonly NoodleRing[] = [
+  { radiusFraction: 0.62, widthFraction: 0.09, ampScale: 1.4, freqScale: 0.55, speedScale: 0.5, phase: 0.6, hueOffset: 30, alpha: 0.14 },
+  { radiusFraction: 1.1, widthFraction: 0.22, ampScale: 1.15, freqScale: 0.45, speedScale: -0.4, phase: 3.1, hueOffset: 200, alpha: 0.13 },
+  { radiusFraction: 1.22, widthFraction: 0.05, ampScale: 0.8, freqScale: 0.65, speedScale: 0.35, phase: 5.2, hueOffset: 300, alpha: 0.1 },
+];
+
+function drawNoodleRings(
+  ctx: CanvasRenderingContext2D,
+  state: GameState,
+  center: number,
+  ringRadius: number,
+  alpha: number,
+) {
+  if (alpha <= 0.02) return;
+  ctx.save();
+  for (const ring of NOODLE_RINGS) {
+    const hue = (state.time / NOODLE_HUE_PERIOD) * 360 + ring.hueOffset;
+    const color = hslToRgb(hue, 0.55, 0.62);
+    ctx.strokeStyle = rgba(color, alpha * ring.alpha);
+    ctx.lineWidth = ringRadius * ring.widthFraction;
+    traceWarpedCircle(
+      ctx,
+      center,
+      ringRadius * ring.radiusFraction,
+      state.time,
+      ring.phase,
+      ring.ampScale,
+      ring.freqScale,
+      ring.speedScale,
+    );
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+// After a direction reversal, the trail regrows from the player outward
+// (closest segment first) instead of the full trail snapping onto the other
+// side, so a reversal reads as the trail starting fresh, not flipping.
+const TRAIL_SEGMENTS = 8;
+const TRAIL_GROW_DURATION = 0.35;
+
 function drawPlayer(
   ctx: CanvasRenderingContext2D,
   state: GameState,
@@ -204,14 +305,23 @@ function drawPlayer(
   alpha: number,
 ) {
   const r = ringRadius * PLAYER_RADIUS_FRACTION;
-  for (let i = 8; i >= 1; i--) {
+  const sinceReversal =
+    state.lastReversedAt === null ? Infinity : state.time - state.lastReversedAt;
+  for (let i = TRAIL_SEGMENTS; i >= 1; i--) {
+    const segmentDelay = ((i - 1) / TRAIL_SEGMENTS) * TRAIL_GROW_DURATION;
+    const segmentGrowth = clamp(
+      (sinceReversal - segmentDelay) / (TRAIL_GROW_DURATION / TRAIL_SEGMENTS),
+      0,
+      1,
+    );
+    if (segmentGrowth <= 0) continue;
     const trailAngle = state.playerAngle - state.playerDirection * i * 0.045;
     const wobble = Math.sin(state.time * 9 - i * 1.4);
     const flicker = 0.75 + 0.25 * Math.sin(state.time * 6 - i * 0.9);
     const [x, y] = pointOn(center, ringRadius + wobble * r * 0.5, trailAngle);
-    ctx.fillStyle = rgba(COLORS.player, alpha * (0.4 - i * 0.04) * flicker);
+    ctx.fillStyle = rgba(COLORS.player, alpha * (0.4 - i * 0.04) * flicker * segmentGrowth);
     ctx.beginPath();
-    ctx.arc(x, y, r * (1 - i * 0.07) * flicker, 0, Math.PI * 2);
+    ctx.arc(x, y, r * (1 - i * 0.07) * flicker * segmentGrowth, 0, Math.PI * 2);
     ctx.fill();
   }
   const [px, py] = pointOn(center, ringRadius, state.playerAngle);
@@ -321,13 +431,102 @@ function drawPendingSpawn(
   ctx.stroke();
 }
 
-// A close call gets a cool burst (you were fine, that fading hazard couldn't
-// hurt you anyway); a last-second reversal gets a hotter, sharper one (that
-// was a real dodge). Both play out as an expanding shockwave, a few
-// radiating spark lines, and a "+N" popup drifting outward as they fade.
-function drawEffect(ctx: CanvasRenderingContext2D, effect: Effect, state: GameState, center: number, ringRadius: number) {
+// The "+N" popup drifting outward as an effect fades. The close-call version
+// passes a nonzero bounce for a squash-and-stretch pop; last-second stays flat.
+function drawEffectLabel(
+  ctx: CanvasRenderingContext2D,
+  effect: Effect,
+  color: Rgb,
+  fade: number,
+  t: number,
+  center: number,
+  ringRadius: number,
+  bounce = 0,
+) {
+  const [lx, ly] = pointOn(center, ringRadius * (1 + 0.14 * t), effect.angle);
+  ctx.shadowBlur = 0;
+  ctx.fillStyle = rgba(color, fade);
+  ctx.font = `700 ${Math.round(ringRadius * 0.09)}px system-ui, sans-serif`;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  if (bounce === 0) {
+    ctx.fillText(`+${effect.amount}`, lx, ly);
+    return;
+  }
+  ctx.save();
+  ctx.translate(lx, ly);
+  ctx.scale(1 + bounce, 1 - bounce * 0.6);
+  ctx.fillText(`+${effect.amount}`, 0, 0);
+  ctx.restore();
+}
+
+// A jagged, flickering star burst — angular and electric, unlike the soft
+// noodle-warp used everywhere else — for the zap-like hazard-dodge effect.
+// The flicker is quantized to ~10 steps/sec (not continuous) so it stutters
+// like a spark rather than smoothly wobbling.
+function drawZapRing(
+  ctx: CanvasRenderingContext2D,
+  cx: number,
+  cy: number,
+  baseRadius: number,
+  time: number,
+  seed: number,
+  spikes: number,
+) {
+  const flickerStep = Math.floor(time * 10);
+  const segments = spikes * 2;
+  ctx.beginPath();
+  for (let i = 0; i <= segments; i++) {
+    const angle = (i / segments) * Math.PI * 2;
+    const isSpike = i % 2 === 0;
+    const jitter = 1 + (hash(seed + i * 3.3 + flickerStep * 0.7) - 0.5) * 0.18;
+    const r = baseRadius * (isSpike ? 1.3 : 0.8) * jitter;
+    const x = cx + r * Math.cos(angle);
+    const y = cy + r * Math.sin(angle);
+    if (i === 0) ctx.moveTo(x, y);
+    else ctx.lineTo(x, y);
+  }
+  ctx.closePath();
+}
+
+// A jagged lightning-bolt line from (x, y) out along `angle`, instead of a
+// plain spark ray — zigzagging sideways, tapering to a point at the tip.
+function drawZapBolt(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  angle: number,
+  len: number,
+  seed: number,
+) {
+  const dirX = Math.cos(angle);
+  const dirY = Math.sin(angle);
+  const perpX = -dirY;
+  const perpY = dirX;
+  const segments = 4;
+  ctx.beginPath();
+  ctx.moveTo(x, y);
+  for (let s = 1; s <= segments; s++) {
+    const along = s / segments;
+    const jag = (hash(seed + s * 7.1) - 0.5) * len * 0.4 * (1 - along);
+    const px = x + dirX * len * along + perpX * jag;
+    const py = y + dirY * len * along + perpY * jag;
+    ctx.lineTo(px, py);
+  }
+}
+
+// A last-second reversal gets a hot, jagged zap — a flickering spiky burst
+// with zigzagging lightning bolts, because that was a real, deliberate
+// dodge and should read as sharp and electric, not soft like a close call.
+function drawLastSecondEffect(
+  ctx: CanvasRenderingContext2D,
+  effect: Effect,
+  state: GameState,
+  center: number,
+  ringRadius: number,
+) {
   const t = clamp((state.time - effect.triggeredAt) / EFFECT_DURATION, 0, 1);
-  const color = effect.kind === "last-second" ? COLORS.lastSecond : COLORS.closeCall;
+  const color = COLORS.lastSecond;
   const fade = 1 - t;
   const [x, y] = pointOn(center, ringRadius, effect.angle);
 
@@ -337,37 +536,74 @@ function drawEffect(ctx: CanvasRenderingContext2D, effect: Effect, state: GameSt
 
   const shockR = ringRadius * (0.05 + 0.24 * t);
   ctx.strokeStyle = rgba(color, fade * 0.9);
-  ctx.lineWidth = Math.max(1, ringRadius * 0.025 * fade);
-  ctx.beginPath();
-  ctx.arc(x, y, shockR, 0, Math.PI * 2);
+  ctx.lineWidth = Math.max(1, ringRadius * 0.02 * fade);
+  drawZapRing(ctx, x, y, shockR, state.time, effect.id * 4.1, 7);
   ctx.stroke();
 
-  const rayCount = effect.kind === "last-second" ? 8 : 6;
-  const innerR = ringRadius * 0.02;
-  const rayLen = ringRadius * (0.05 + 0.16 * t);
-  for (let i = 0; i < rayCount; i++) {
-    const a = (i / rayCount) * Math.PI * 2 + t * 1.6;
-    const ix = x + Math.cos(a) * innerR;
-    const iy = y + Math.sin(a) * innerR;
-    const ox = x + Math.cos(a) * (innerR + rayLen);
-    const oy = y + Math.sin(a) * (innerR + rayLen);
+  const boltCount = 6;
+  const boltLen = ringRadius * (0.07 + 0.18 * t);
+  for (let i = 0; i < boltCount; i++) {
+    const a = (i / boltCount) * Math.PI * 2 + t * 1.6;
     ctx.strokeStyle = rgba(color, fade * 0.85);
-    ctx.lineWidth = Math.max(1, ringRadius * 0.014 * fade);
-    ctx.beginPath();
-    ctx.moveTo(ix, iy);
-    ctx.lineTo(ox, oy);
+    ctx.lineWidth = Math.max(1, ringRadius * 0.015 * fade);
+    drawZapBolt(ctx, x, y, a, boltLen, effect.id * 9.3 + i * 5.7);
     ctx.stroke();
   }
 
-  const [lx, ly] = pointOn(center, ringRadius * (1 + 0.14 * t), effect.angle);
-  ctx.shadowBlur = 0;
-  ctx.fillStyle = rgba(color, fade);
-  ctx.font = `700 ${Math.round(ringRadius * 0.09)}px system-ui, sans-serif`;
-  ctx.textAlign = "center";
-  ctx.textBaseline = "middle";
-  ctx.fillText(`+${effect.amount}`, lx, ly);
-
+  drawEffectLabel(ctx, effect, color, fade, t, center, ringRadius);
   ctx.restore();
+}
+
+// A close call gets a playful poof, not a hit-spark — you were fine, so it
+// reads as a giggle rather than a scare: a wobbly, noodle-warped burst ring
+// (the same liquid-ripple language as the planet and the ambient rings)
+// with a handful of bubbles spiralling outward and popping as they fade.
+const CLOSE_CALL_BUBBLES = 7;
+
+function drawCloseCallEffect(
+  ctx: CanvasRenderingContext2D,
+  effect: Effect,
+  state: GameState,
+  center: number,
+  ringRadius: number,
+) {
+  const t = clamp((state.time - effect.triggeredAt) / EFFECT_DURATION, 0, 1);
+  const color = COLORS.closeCall;
+  const fade = 1 - t;
+  const [x, y] = pointOn(center, ringRadius, effect.angle);
+
+  ctx.save();
+  ctx.shadowColor = rgba(color, fade * 0.8);
+  ctx.shadowBlur = ringRadius * 0.07;
+
+  const burstR = ringRadius * (0.04 + 0.2 * t);
+  ctx.strokeStyle = rgba(color, fade * 0.7);
+  ctx.lineWidth = Math.max(1, ringRadius * 0.022 * fade);
+  traceWarpedCircleAt(ctx, x, y, burstR, state.time, effect.id * 2.3, 2.6, 2, 2.4);
+  ctx.stroke();
+
+  for (let i = 0; i < CLOSE_CALL_BUBBLES; i++) {
+    const seed = effect.id * 13.7 + i * 3.1;
+    const baseAngle = hash(seed) * Math.PI * 2;
+    const spiral = baseAngle + t * (1.8 + hash(seed + 1) * 1.6);
+    const dist = ringRadius * (0.02 + (0.13 + hash(seed + 2) * 0.09) * t);
+    const bx = x + Math.cos(spiral) * dist;
+    const by = y + Math.sin(spiral) * dist;
+    const pop = Math.sin(clamp(t * 1.4, 0, 1) * Math.PI);
+    const bubbleR = ringRadius * (0.008 + 0.02 * hash(seed + 3)) * pop;
+    ctx.fillStyle = rgba(color, fade * (0.55 + 0.3 * hash(seed + 4)));
+    ctx.beginPath();
+    ctx.arc(bx, by, Math.max(0, bubbleR), 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  drawEffectLabel(ctx, effect, color, fade, t, center, ringRadius, 0.15 * Math.sin(t * Math.PI));
+  ctx.restore();
+}
+
+function drawEffect(ctx: CanvasRenderingContext2D, effect: Effect, state: GameState, center: number, ringRadius: number) {
+  if (effect.kind === "close-call") drawCloseCallEffect(ctx, effect, state, center, ringRadius);
+  else drawLastSecondEffect(ctx, effect, state, center, ringRadius);
 }
 
 function drawScore(ctx: CanvasRenderingContext2D, state: GameState, size: number) {
@@ -431,7 +667,8 @@ export function render(ctx: CanvasRenderingContext2D, state: GameState, size: nu
   ctx.fillRect(0, 0, size, size);
 
   drawStars(ctx, state, size);
-  drawPlanet(ctx, state, center, ringRadius * 0.32, ringAlpha);
+  drawPlanet(ctx, state, center, ringRadius * 0.44, ringAlpha);
+  drawNoodleRings(ctx, state, center, ringRadius, ringAlpha);
 
   // A quick, small flare right after a direction change — the ring briefly
   // widens/brightens a touch, decaying back to its resting look.
@@ -446,12 +683,13 @@ export function render(ctx: CanvasRenderingContext2D, state: GameState, size: nu
   const widestRingWidth = playerDiameter * 1.5;
 
   ctx.save();
-  // A wide, faint band gives the path a soft glow-halo, then a thin line on
-  // top marks its exact radius — both kept low-contrast against the bg.
+  // A wide, faint band gives the path a soft glow-halo — warped the same way
+  // as the planet's surface, so it reads as part of the same living scene —
+  // then a thin line on top marks the player's exact, perfectly circular
+  // orbit radius. Both kept low-contrast against the bg.
   ctx.strokeStyle = rgba(COLORS.ring, ringAlpha * (0.08 + 0.1 * pulse));
   ctx.lineWidth = widestRingWidth * (1 + 0.15 * pulse);
-  ctx.beginPath();
-  ctx.arc(center, center, ringRadius, 0, Math.PI * 2);
+  traceWarpedCircle(ctx, center, ringRadius, state.time, Math.PI);
   ctx.stroke();
 
   ctx.shadowColor = rgba(COLORS.ring, ringAlpha * (0.25 + 0.2 * pulse));
