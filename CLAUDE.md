@@ -9,6 +9,15 @@ The
 publishes this deliverable's brief and spec, and this repo's name tells you
 which deliverable applies. Read both before you plan or build.
 
+## How to work in here
+
+- Keep the dev server running (`pnpm dev`) so you see changes as you make them.
+- Run `pnpm check` before you push.
+- Open the page in a browser and look at it. The rendered page is the truth;
+  your mental model of it isn't.
+- When a check fails, read its output before you change anything.
+- Never commit a red state.
+
 ## The link-preview card
 
 `public/card.png` (1200x630) is the image a shared link shows; `index.html`'s
