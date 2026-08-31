@@ -1,5 +1,8 @@
 import { createInitialState, tick, handleInput } from "./game";
 import { render } from "./render";
+import { createAudioEngine } from "./audio";
+
+const audio = createAudioEngine();
 
 const canvasOrNull = document.querySelector<HTMLCanvasElement>("#game");
 if (!canvasOrNull) throw new Error("missing #game canvas");
@@ -34,7 +37,13 @@ window.addEventListener("resize", resize);
 resize();
 
 function reverse() {
+  audio.unlock();
+  const prevGameOver = state.gameOver;
+  const prevDirection = state.playerDirection;
   state = handleInput(state);
+  if (!prevGameOver && state.playerDirection !== prevDirection) {
+    audio.directionChange(state.playerDirection);
+  }
 }
 window.addEventListener("pointerdown", reverse);
 window.addEventListener("keydown", reverse);
@@ -43,13 +52,37 @@ let last = performance.now();
 function frame(now: number) {
   const dt = Math.min(0.05, (now - last) / 1000);
   last = now;
+  const prevState = state;
   state = tick(state, dt);
-  if (state.gameOver && !wasGameOver && state.score > highScore) {
-    highScore = Math.floor(state.score);
-    localStorage.setItem(HIGH_SCORE_KEY, String(highScore));
-    paintHighScore();
+
+  const prevHazardIds = new Set(prevState.hazards.map((hazard) => hazard.id));
+  for (const hazard of state.hazards) {
+    if (!prevHazardIds.has(hazard.id)) audio.obstacleBorn();
+  }
+  const currentHazardIds = new Set(state.hazards.map((hazard) => hazard.id));
+  for (const id of prevHazardIds) {
+    if (!currentHazardIds.has(id)) audio.obstacleDied();
+  }
+
+  const prevEffectIds = new Set(prevState.effects.map((effect) => effect.id));
+  for (const effect of state.effects) {
+    if (prevEffectIds.has(effect.id)) continue;
+    if (effect.kind === "close-call") audio.closeCall();
+    else audio.nearMiss();
+  }
+
+  if (state.gameOver && !wasGameOver) {
+    audio.death();
+    if (state.score > highScore) {
+      highScore = Math.floor(state.score);
+      localStorage.setItem(HIGH_SCORE_KEY, String(highScore));
+      paintHighScore();
+    }
   }
   wasGameOver = state.gameOver;
+
+  audio.tickMusic(Math.min(state.time, state.gameOverAt ?? state.time));
+
   render(ctx, state, size);
   requestAnimationFrame(frame);
 }

@@ -47,6 +47,13 @@ describe("orbit reversal dodge: game rules", () => {
     expect(handleInput(reversed).playerDirection).toBe(1);
   });
 
+  it("records when the player last reversed, for a reversal effect to key off", () => {
+    const state = createInitialState({ rng: seeded(1) });
+    expect(state.lastReversedAt).toBeNull();
+    const ticked = tick(state, 2);
+    expect(handleInput(ticked).lastReversedAt).toBe(ticked.time);
+  });
+
   it("advances a moving hazard's angle over time but leaves a static hazard's angle fixed", () => {
     const base = createInitialState({ rng: seeded(2) });
     const moving: Hazard = { id: 1, kind: "moving", angle: 0, direction: 1, speed: 1, spawnedAt: 0, lifetime: 100 };

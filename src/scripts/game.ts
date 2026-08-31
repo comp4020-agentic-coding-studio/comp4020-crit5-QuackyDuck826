@@ -63,6 +63,7 @@ export interface GameState {
   movingIntroScheduled: boolean;
   staticIntroScheduled: boolean;
   lastSpawnAt: number;
+  lastReversedAt: number | null;
   rng: () => number;
 }
 
@@ -161,6 +162,7 @@ export function createInitialState(options: { rng?: () => number } = {}): GameSt
     movingIntroScheduled: false,
     staticIntroScheduled: false,
     lastSpawnAt: 0,
+    lastReversedAt: null,
     rng: options.rng ?? Math.random,
   };
 }
@@ -349,6 +351,7 @@ export function handleInput(state: GameState): GameState {
     effects: [...state.effects, ...newEffects],
     nextId,
     playerDirection: state.playerDirection === 1 ? -1 : 1,
+    lastReversedAt: state.time,
     score: state.score + lastSecondBonus,
   };
 }
