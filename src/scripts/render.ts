@@ -1,7 +1,7 @@
 // Canvas rendering — reads GameState, never mutates it. Trails are drawn
 // procedurally from angle + direction rather than stored history, so state
 // stays plain data.
-import { hazardLifeFraction, isTelegraphing, type GameState, type Hazard } from "./game";
+import { hazardLifeFraction, hazardSpawnFraction, isTelegraphing, type GameState, type Hazard } from "./game";
 
 type Rgb = readonly [number, number, number];
 
@@ -94,10 +94,13 @@ function drawHazard(
   ringRadius: number,
   size: number,
 ) {
-  const fraction = hazardLifeFraction(hazard, state.time);
+  const lifeFraction = hazardLifeFraction(hazard, state.time);
   const telegraphing = isTelegraphing(hazard, state.time);
-  const scale = telegraphing ? Math.max(0.15, fraction / 0.2) : 1;
-  const alpha = telegraphing ? Math.max(0.12, fraction / 0.2) : 1;
+  const endScale = telegraphing ? Math.max(0.15, lifeFraction / 0.2) : 1;
+  const endAlpha = telegraphing ? Math.max(0.12, lifeFraction / 0.2) : 1;
+  const spawnFraction = hazardSpawnFraction(hazard, state.time);
+  const scale = spawnFraction * endScale;
+  const alpha = spawnFraction * endAlpha;
   const r = size * 0.016 * scale;
   const [x, y] = pointOn(center, ringRadius, hazard.angle);
 

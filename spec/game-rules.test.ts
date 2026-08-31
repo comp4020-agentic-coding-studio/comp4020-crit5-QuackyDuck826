@@ -1,9 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
+  checkCollision,
   createInitialState,
   handleInput,
   hazardLifeFraction,
+  isSpawning,
   isTelegraphing,
+  SPAWN_FADE_DURATION,
   tick,
   tierIndexForTime,
   TIERS,
@@ -67,7 +70,7 @@ describe("orbit reversal dodge: game rules", () => {
       angle: base.playerAngle,
       direction: 1,
       speed: 0,
-      spawnedAt: 0,
+      spawnedAt: -1, // already fully faded in, so this isolates the collision rule
       lifetime: 100,
     };
     const state = withHazards(base, [hazard]);
@@ -135,7 +138,7 @@ describe("orbit reversal dodge: game rules", () => {
       angle: base.playerAngle,
       direction: 1,
       speed: 0,
-      spawnedAt: 0,
+      spawnedAt: -1,
       lifetime: 100,
     };
     let state = withHazards(base, [hazard]);
@@ -149,6 +152,31 @@ describe("orbit reversal dodge: game rules", () => {
     const restarted = handleInput(state);
     expect(restarted.gameOver).toBe(false);
     expect(restarted.time).toBe(0);
+  });
+
+  it("marks a hazard as spawning only for a brief window right after it appears", () => {
+    const hazard: Hazard = { id: 1, kind: "static", angle: 0, direction: 1, speed: 0, spawnedAt: 5, lifetime: 100 };
+    expect(isSpawning(hazard, 5)).toBe(true);
+    expect(isSpawning(hazard, 5 + SPAWN_FADE_DURATION - 0.01)).toBe(true);
+    expect(isSpawning(hazard, 5 + SPAWN_FADE_DURATION + 0.01)).toBe(false);
+  });
+
+  it("does not collide with a hazard that is still fading in, but does once it has fully appeared", () => {
+    const base = createInitialState({ rng: seeded(10) });
+    const freshHazard: Hazard = {
+      id: 1,
+      kind: "static",
+      angle: base.playerAngle,
+      direction: 1,
+      speed: 0,
+      spawnedAt: 0,
+      lifetime: 100,
+    };
+    const spawning = withHazards({ ...base, time: 0.01 }, [freshHazard]);
+    expect(checkCollision(spawning)).toBe(false);
+
+    const spawned = withHazards({ ...base, time: SPAWN_FADE_DURATION + 0.01 }, [freshHazard]);
+    expect(checkCollision(spawned)).toBe(true);
   });
 
   it("teaches by sequencing: the first hazard is the moving kind, introduced after a grace period", () => {

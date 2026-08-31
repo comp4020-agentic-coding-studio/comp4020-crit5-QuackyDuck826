@@ -48,6 +48,7 @@ const INTRO_STATIC_GAP = 2.5; // gap after the moving intro before the static on
 const HIT_ANGLE = 0.16; // combined player+hazard angular hit radius (~9 degrees)
 const TELEGRAPH_FRACTION = 0.2; // last 20% of life: hazard shrinks/dims
 const RESTART_DELAY = 0.5; // seconds after game-over before restart input counts
+export const SPAWN_FADE_DURATION = 0.35; // seconds a hazard spends fading in, harmless
 
 export function normalizeAngle(angle: number): number {
   const twoPi = Math.PI * 2;
@@ -76,6 +77,18 @@ export function isTelegraphing(hazard: Hazard, time: number): boolean {
   return hazardLifeFraction(hazard, time) <= TELEGRAPH_FRACTION;
 }
 
+export function hazardSpawnFraction(hazard: Hazard, time: number): number {
+  const elapsed = time - hazard.spawnedAt;
+  return Math.min(1, Math.max(0, elapsed / SPAWN_FADE_DURATION));
+}
+
+// A hazard fading in is visually harmless: a fresh spawn (including right on
+// top of the player, which the intro sequence and random spawns can both
+// produce) shouldn't be a surprise kill before it's even fully visible.
+export function isSpawning(hazard: Hazard, time: number): boolean {
+  return hazardSpawnFraction(hazard, time) < 1;
+}
+
 export function createInitialState(options: { rng?: () => number } = {}): GameState {
   return {
     time: 0,
@@ -95,7 +108,9 @@ export function createInitialState(options: { rng?: () => number } = {}): GameSt
 }
 
 export function checkCollision(state: GameState): boolean {
-  return state.hazards.some((hazard) => angularDistance(hazard.angle, state.playerAngle) < HIT_ANGLE);
+  return state.hazards.some(
+    (hazard) => !isSpawning(hazard, state.time) && angularDistance(hazard.angle, state.playerAngle) < HIT_ANGLE,
+  );
 }
 
 function spawnHazard(state: GameState, kind: HazardKind, angle: number): GameState {
