@@ -111,11 +111,18 @@ function drawTriangle(
   ctx.restore();
 }
 
-function drawDiamond(ctx: CanvasRenderingContext2D, x: number, y: number, r: number, color: string) {
+function drawDiamond(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  r: number,
+  rotation: number,
+  color: string,
+) {
   ctx.fillStyle = color;
   ctx.save();
   ctx.translate(x, y);
-  ctx.rotate(Math.PI / 4);
+  ctx.rotate(rotation + Math.PI / 4);
   ctx.fillRect(-r * 0.85, -r * 0.85, r * 1.7, r * 1.7);
   ctx.restore();
 }
@@ -141,7 +148,9 @@ function drawHazard(ctx: CanvasRenderingContext2D, hazard: Hazard, state: GameSt
     const heading = hazard.angle + hazard.direction * (Math.PI / 2);
     drawTriangle(ctx, x, y, r, heading, rgba(color, alpha));
   } else {
-    drawDiamond(ctx, x, y, r, rgba(color, alpha));
+    // Rotate to the hazard's own position on the ring, so it reads as sitting
+    // on the orbit path rather than just stamped over it.
+    drawDiamond(ctx, x, y, r, hazard.angle, rgba(color, alpha));
   }
 }
 
