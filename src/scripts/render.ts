@@ -20,6 +20,8 @@ const COLORS = {
   player: [123, 232, 255] as Rgb,
   danger: [255, 106, 61] as Rgb,
   score: [200, 230, 255] as Rgb,
+  planetCore: [90, 170, 230] as Rgb,
+  planetEdge: [8, 12, 26] as Rgb,
 };
 
 function rgba([r, g, b]: Rgb, a: number): string {
@@ -65,6 +67,54 @@ function ringAlphaFor(state: GameState): number {
   const elapsed = state.time - state.gameOverAt;
   const fade = clamp((elapsed - 0.2) / 0.8, 0, 1);
   return 1 - fade;
+}
+
+function roundedRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r);
+  ctx.arcTo(x, y, x + w, y, r);
+  ctx.closePath();
+}
+
+// What everything else orbits: a shaded core plus rings of light that ripple
+// outward on a loop, so the center of the board reads as alive rather than
+// empty space inside the ring.
+const PLANET_RIPPLE_COUNT = 3;
+const PLANET_RIPPLE_PERIOD = 3.4; // seconds per ripple cycle
+
+function drawPlanet(ctx: CanvasRenderingContext2D, state: GameState, center: number, radius: number, alpha: number) {
+  ctx.save();
+  ctx.globalAlpha = alpha;
+
+  const gradient = ctx.createRadialGradient(
+    center - radius * 0.35,
+    center - radius * 0.35,
+    radius * 0.05,
+    center,
+    center,
+    radius,
+  );
+  gradient.addColorStop(0, rgba(COLORS.planetCore, 1));
+  gradient.addColorStop(1, rgba(COLORS.planetEdge, 1));
+  ctx.fillStyle = gradient;
+  ctx.beginPath();
+  ctx.arc(center, center, radius, 0, Math.PI * 2);
+  ctx.fill();
+
+  for (let i = 0; i < PLANET_RIPPLE_COUNT; i++) {
+    const phase = ((state.time / PLANET_RIPPLE_PERIOD + i / PLANET_RIPPLE_COUNT) % 1 + 1) % 1;
+    const r = radius * (1 + phase * 1.6);
+    ctx.strokeStyle = rgba(COLORS.ring, (1 - phase) * 0.35);
+    ctx.lineWidth = Math.max(1, radius * 0.02 * (1 - phase));
+    ctx.beginPath();
+    ctx.arc(center, center, r, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+
+  ctx.restore();
 }
 
 function drawPlayer(
@@ -181,12 +231,33 @@ function drawPendingSpawn(
 
 function drawScore(ctx: CanvasRenderingContext2D, state: GameState, size: number) {
   ctx.textAlign = "center";
-  ctx.textBaseline = "top";
+  ctx.textBaseline = "middle";
 
   if (!state.gameOver) {
-    ctx.fillStyle = rgba(COLORS.score, 0.75);
-    ctx.font = `${Math.round(size * 0.028)}px system-ui, sans-serif`;
-    ctx.fillText(String(Math.floor(state.score)), size / 2, size * 0.04);
+    const text = String(Math.floor(state.score));
+    const fontSize = size * 0.032;
+    ctx.font = `700 ${Math.round(fontSize)}px system-ui, sans-serif`;
+
+    const pulse = 0.5 + 0.5 * Math.sin(state.time * 1.6);
+    const chipW = Math.max(size * 0.11, ctx.measureText(text).width + size * 0.045);
+    const chipH = size * 0.05;
+    const chipX = size / 2 - chipW / 2;
+    const chipY = size * 0.025;
+
+    ctx.fillStyle = rgba(COLORS.bg, 0.55);
+    roundedRect(ctx, chipX, chipY, chipW, chipH, chipH / 2);
+    ctx.fill();
+
+    ctx.strokeStyle = rgba(COLORS.score, 0.22 + 0.18 * pulse);
+    ctx.lineWidth = Math.max(1, size * 0.0018);
+    roundedRect(ctx, chipX, chipY, chipW, chipH, chipH / 2);
+    ctx.stroke();
+
+    ctx.shadowColor = rgba(COLORS.score, 0.6);
+    ctx.shadowBlur = size * 0.015;
+    ctx.fillStyle = rgba(COLORS.score, 0.9);
+    ctx.fillText(text, size / 2, chipY + chipH / 2);
+    ctx.shadowBlur = 0;
     return;
   }
 
@@ -194,9 +265,12 @@ function drawScore(ctx: CanvasRenderingContext2D, state: GameState, size: number
   const growth = clamp((elapsed - 0.2) / 0.6, 0, 1);
   if (growth <= 0) return;
   const fontSize = size * (0.028 + 0.09 * growth);
+  ctx.shadowColor = rgba(COLORS.score, 0.5 * growth);
+  ctx.shadowBlur = size * 0.03 * growth;
   ctx.fillStyle = rgba(COLORS.score, 0.4 + 0.6 * growth);
-  ctx.font = `${Math.round(fontSize)}px system-ui, sans-serif`;
+  ctx.font = `700 ${Math.round(fontSize)}px system-ui, sans-serif`;
   ctx.fillText(String(Math.floor(state.score)), size / 2, size * 0.4);
+  ctx.shadowBlur = 0;
 }
 
 export function render(ctx: CanvasRenderingContext2D, state: GameState, size: number) {
@@ -206,6 +280,8 @@ export function render(ctx: CanvasRenderingContext2D, state: GameState, size: nu
 
   ctx.fillStyle = rgba(COLORS.bg, 1);
   ctx.fillRect(0, 0, size, size);
+
+  drawPlanet(ctx, state, center, ringRadius * 0.32, ringAlpha);
 
   ctx.strokeStyle = rgba(COLORS.ring, ringAlpha * 0.6);
   ctx.lineWidth = Math.max(1, size * 0.002);
