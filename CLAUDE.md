@@ -17,6 +17,7 @@ which deliverable applies. Read both before you plan or build.
   your mental model of it isn't.
 - When a check fails, read its output before you change anything.
 - Never commit a red state.
+- commit early and often in places where it makes sense
 
 ## The link-preview card
 
