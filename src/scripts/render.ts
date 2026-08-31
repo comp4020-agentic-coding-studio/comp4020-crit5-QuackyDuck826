@@ -106,11 +106,37 @@ function drawStars(ctx: CanvasRenderingContext2D, state: GameState, size: number
   }
 }
 
-// What everything else orbits: a shaded core plus rings of light that ripple
-// outward on a loop, so the center of the board reads as alive rather than
-// empty space inside the ring.
-const PLANET_RIPPLE_COUNT = 3;
-const PLANET_RIPPLE_PERIOD = 3.4; // seconds per ripple cycle
+// What everything else orbits: a shaded core whose own boundary and inner
+// contours warp continuously (two overlapping sine waves per layer, phase
+// driven by state.time) — a liquid ripple across the surface itself, not a
+// pulse of rings expanding outward.
+const PLANET_SEGMENTS = 72;
+const PLANET_RIPPLE_LAYERS = 3;
+
+function warpedRadiusAt(baseRadius: number, angle: number, time: number, phase: number): number {
+  const w1 = Math.sin(angle * 3 + time * 1.1 + phase) * 0.06;
+  const w2 = Math.sin(angle * 5 - time * 0.7 + phase * 1.4) * 0.03;
+  return baseRadius * (1 + w1 + w2);
+}
+
+function traceWarpedCircle(
+  ctx: CanvasRenderingContext2D,
+  center: number,
+  baseRadius: number,
+  time: number,
+  phase: number,
+) {
+  ctx.beginPath();
+  for (let i = 0; i <= PLANET_SEGMENTS; i++) {
+    const angle = (i / PLANET_SEGMENTS) * Math.PI * 2;
+    const r = warpedRadiusAt(baseRadius, angle, time, phase);
+    const x = center + r * Math.cos(angle);
+    const y = center + r * Math.sin(angle);
+    if (i === 0) ctx.moveTo(x, y);
+    else ctx.lineTo(x, y);
+  }
+  ctx.closePath();
+}
 
 function drawPlanet(ctx: CanvasRenderingContext2D, state: GameState, center: number, radius: number, alpha: number) {
   ctx.save();
@@ -127,17 +153,15 @@ function drawPlanet(ctx: CanvasRenderingContext2D, state: GameState, center: num
   gradient.addColorStop(0, rgba(COLORS.planetCore, 1));
   gradient.addColorStop(1, rgba(COLORS.planetEdge, 1));
   ctx.fillStyle = gradient;
-  ctx.beginPath();
-  ctx.arc(center, center, radius, 0, Math.PI * 2);
+  traceWarpedCircle(ctx, center, radius, state.time, 0);
   ctx.fill();
 
-  for (let i = 0; i < PLANET_RIPPLE_COUNT; i++) {
-    const phase = ((state.time / PLANET_RIPPLE_PERIOD + i / PLANET_RIPPLE_COUNT) % 1 + 1) % 1;
-    const r = radius * (1 + phase * 1.6);
-    ctx.strokeStyle = rgba(COLORS.ring, (1 - phase) * 0.35);
-    ctx.lineWidth = Math.max(1, radius * 0.02 * (1 - phase));
-    ctx.beginPath();
-    ctx.arc(center, center, r, 0, Math.PI * 2);
+  for (let i = 1; i <= PLANET_RIPPLE_LAYERS; i++) {
+    const layerRadius = radius * (1 - i * 0.24);
+    const phase = i * 1.9 + state.time * 0.35;
+    traceWarpedCircle(ctx, center, layerRadius, state.time, phase);
+    ctx.strokeStyle = rgba(COLORS.ring, 0.16);
+    ctx.lineWidth = Math.max(1, radius * 0.012);
     ctx.stroke();
   }
 
