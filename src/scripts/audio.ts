@@ -4,27 +4,22 @@
 // main.ts is the only caller: it unlocks audio on the first user gesture and
 // calls into this module when state transitions happen.
 
-const ARPEGGIO_SCALE = [220.0, 261.63, 293.66, 329.63, 392.0]; // A minor pentatonic
-const ARPEGGIO_PATTERN = [0, 2, 1, 3, 2, 4, 3, 1];
-const MUSIC_BASE_INTERVAL = 0.85; // seconds between notes at the start of a run
-const MUSIC_MIN_INTERVAL = 0.32; // seconds between notes once fully ramped up
+// A simple, four-chord loop (i–VI–III–VII in A minor) held as soft sine
+// pads — plain and pleasant rather than busy, per feedback that the old
+// arpeggio/bitcrush bed sounded broken.
+const CHORDS = [
+  [220.0, 261.63, 329.63], // A minor
+  [174.61, 220.0, 261.63], // F major
+  [261.63, 329.63, 392.0], // C major
+  [196.0, 246.94, 293.66], // G major
+];
+const MUSIC_CHORD_BASE_DURATION = 3.2; // seconds per chord at the start of a run
+const MUSIC_CHORD_MIN_DURATION = 1.8; // seconds per chord once fully ramped up
 const MUSIC_RAMP_SECONDS = 90; // how long it takes to reach the fastest tempo
-const SCHEDULE_AHEAD = 0.2; // seconds of lookahead per tick
-const BITCRUSH_STEPS = 5; // low step count = an aggressive, lo-fi quantized crunch
+const SCHEDULE_AHEAD = 0.3; // seconds of lookahead per tick
 
 function lerp(a: number, b: number, t: number): number {
   return a + (b - a) * t;
-}
-
-// A WaveShaper quantizing amplitude into a handful of discrete steps reads as
-// classic digital bitcrush distortion without needing an AudioWorklet.
-function makeBitcrushCurve(steps: number): Float32Array<ArrayBuffer> {
-  const curve = new Float32Array(new ArrayBuffer(1024 * Float32Array.BYTES_PER_ELEMENT));
-  for (let i = 0; i < 1024; i++) {
-    const x = (i / 1023) * 2 - 1;
-    curve[i] = Math.round(x * steps) / steps;
-  }
-  return curve;
 }
 
 export interface AudioEngine {
@@ -44,10 +39,8 @@ export function createAudioEngine(): AudioEngine {
   let musicBus: GainNode;
   let sfxBus: GainNode;
   let delayIn: DelayNode;
-  let droneFilter: BiquadFilterNode | null = null;
-  let nextNoteTime = 0;
-  let patternIndex = 0;
-  let droneStarted = false;
+  let nextChordTime = 0;
+  let chordIndex = 0;
 
   function ensureCtx(): AudioContext {
     if (ctx) return ctx;
@@ -57,17 +50,16 @@ export function createAudioEngine(): AudioEngine {
     master.gain.value = 0.7;
     master.connect(ctx.destination);
 
-    // The whole music bed (drone + arpeggio) is quantized through a crusher
-    // before it reaches master — dramatic, lo-fi, digital grit under the
-    // cleaner sine SFX layered on top.
-    const bitcrush = ctx.createWaveShaper();
-    bitcrush.curve = makeBitcrushCurve(BITCRUSH_STEPS);
-    bitcrush.oversample = "none";
-    bitcrush.connect(master);
+    // A gentle, fixed lowpass keeps the chord pads warm and soft — no
+    // resonance sweeps or distortion, just a plain, clean bed.
+    const musicFilter = ctx.createBiquadFilter();
+    musicFilter.type = "lowpass";
+    musicFilter.frequency.value = 1400;
+    musicFilter.connect(master);
 
     musicBus = ctx.createGain();
-    musicBus.gain.value = 0.4;
-    musicBus.connect(bitcrush);
+    musicBus.gain.value = 0.55;
+    musicBus.connect(musicFilter);
 
     sfxBus = ctx.createGain();
     sfxBus.gain.value = 0.9;
@@ -160,98 +152,43 @@ export function createAudioEngine(): AudioEngine {
     source.stop(t0 + duration + 0.02);
   }
 
-  function startDrone() {
-    if (droneStarted) return;
-    droneStarted = true;
+  function playChord(t0: number, duration: number) {
     const audio = ensureCtx();
+    const chord = CHORDS[chordIndex % CHORDS.length];
+    chordIndex++;
 
-    const filter = audio.createBiquadFilter();
-    filter.type = "lowpass";
-    filter.frequency.value = 300;
-    filter.Q.value = 0.7;
-    filter.connect(musicBus);
-    droneFilter = filter;
+    const attack = Math.min(0.6, duration * 0.25);
+    const release = Math.min(0.9, duration * 0.35);
 
-    const lfo = audio.createOscillator();
-    lfo.frequency.value = 0.07;
-    const lfoGain = audio.createGain();
-    lfoGain.gain.value = 220;
-    lfo.connect(lfoGain);
-    lfoGain.connect(filter.frequency);
-    lfo.start();
-
-    for (const detune of [-4, 4]) {
+    for (const freq of chord) {
       const osc = audio.createOscillator();
       osc.type = "sine";
-      osc.frequency.value = 55;
-      osc.detune.value = detune;
+      osc.frequency.value = freq;
+
       const gain = audio.createGain();
-      gain.gain.value = 0.06;
+      gain.gain.setValueAtTime(0, t0);
+      gain.gain.linearRampToValueAtTime(0.07, t0 + attack);
+      gain.gain.setValueAtTime(0.07, t0 + duration - release);
+      gain.gain.linearRampToValueAtTime(0, t0 + duration);
+
       osc.connect(gain);
-      gain.connect(filter);
-      osc.start();
+      gain.connect(musicBus);
+
+      const send = audio.createGain();
+      send.gain.value = 0.18;
+      gain.connect(send);
+      sendToDelay(send);
+
+      osc.start(t0);
+      osc.stop(t0 + duration + 0.05);
     }
-  }
-
-  function playSubThump(t0: number, rampT: number) {
-    const audio = ensureCtx();
-    const osc = audio.createOscillator();
-    osc.type = "sine";
-    osc.frequency.setValueAtTime(95, t0);
-    osc.frequency.exponentialRampToValueAtTime(42, t0 + 0.3);
-    const gain = audio.createGain();
-    gain.gain.setValueAtTime(0.16 + 0.12 * rampT, t0);
-    gain.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.32);
-    osc.connect(gain);
-    gain.connect(musicBus);
-    osc.start(t0);
-    osc.stop(t0 + 0.34);
-  }
-
-  function playArpeggioNote(interval: number, rampT: number) {
-    const loopIndex = patternIndex % ARPEGGIO_PATTERN.length;
-    const step = ARPEGGIO_PATTERN[loopIndex];
-    patternIndex++;
-    const freq = ARPEGGIO_SCALE[step];
-    const audio = ensureCtx();
-    const t0 = nextNoteTime;
-    if (loopIndex === 0) playSubThump(t0, rampT);
-
-    // Pure sine, no detune: a plainer, more "sine-wavey" tone than the old
-    // triangle, with the crusher above doing the work of adding character.
-    const osc = audio.createOscillator();
-    osc.type = "sine";
-    osc.frequency.value = freq;
-
-    const filter = audio.createBiquadFilter();
-    filter.type = "lowpass";
-    filter.frequency.value = lerp(900, 3200, rampT);
-    filter.Q.value = lerp(0.6, 5, rampT);
-
-    const gain = audio.createGain();
-    gain.gain.setValueAtTime(0, t0);
-    gain.gain.linearRampToValueAtTime(0.14 + 0.06 * rampT, t0 + 0.01);
-    gain.gain.exponentialRampToValueAtTime(0.0001, t0 + interval * 0.85);
-
-    osc.connect(filter);
-    filter.connect(gain);
-    gain.connect(musicBus);
-
-    const send = audio.createGain();
-    send.gain.value = 0.3;
-    gain.connect(send);
-    sendToDelay(send);
-
-    osc.start(t0);
-    osc.stop(t0 + interval);
   }
 
   return {
     unlock() {
       const audio = ensureCtx();
       if (audio.state === "suspended") audio.resume();
-      startDrone();
-      if (nextNoteTime === 0) nextNoteTime = audio.currentTime + 0.1;
+      if (nextChordTime === 0) nextChordTime = audio.currentTime + 0.15;
     },
 
     directionChange(direction) {
@@ -318,19 +255,13 @@ export function createAudioEngine(): AudioEngine {
     },
 
     tickMusic(runElapsed) {
-      if (!ctx || nextNoteTime === 0) return;
+      if (!ctx || nextChordTime === 0) return;
       const rampT = Math.min(1, Math.max(0, runElapsed / MUSIC_RAMP_SECONDS));
-      const interval = lerp(MUSIC_BASE_INTERVAL, MUSIC_MIN_INTERVAL, rampT);
+      const duration = lerp(MUSIC_CHORD_BASE_DURATION, MUSIC_CHORD_MIN_DURATION, rampT);
 
-      musicBus.gain.value = lerp(0.4, 0.62, rampT);
-      if (droneFilter) {
-        droneFilter.frequency.value = lerp(300, 650, rampT);
-        droneFilter.Q.value = lerp(0.7, 4.5, rampT);
-      }
-
-      while (nextNoteTime < ctx.currentTime + SCHEDULE_AHEAD) {
-        playArpeggioNote(interval, rampT);
-        nextNoteTime += interval;
+      while (nextChordTime < ctx.currentTime + SCHEDULE_AHEAD) {
+        playChord(nextChordTime, duration);
+        nextChordTime += duration;
       }
     },
   };
