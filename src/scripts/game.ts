@@ -138,9 +138,14 @@ export function createInitialState(options: { rng?: () => number } = {}): GameSt
   };
 }
 
-// Only real hazards collide — a pending spawn is a warning, not a threat yet.
+// Only real hazards collide — a pending spawn is a warning, not a threat yet,
+// and a hazard already telegraphing its despawn (shrinking/dimming in its
+// final TELEGRAPH_FRACTION of life) reads as leaving, not lethal.
 export function checkCollision(state: GameState): boolean {
-  return state.hazards.some((hazard) => angularDistance(hazard.angle, state.playerAngle) < HIT_ANGLE);
+  return state.hazards.some(
+    (hazard) =>
+      !isTelegraphing(hazard, state.time) && angularDistance(hazard.angle, state.playerAngle) < HIT_ANGLE,
+  );
 }
 
 function schedulePendingSpawn(

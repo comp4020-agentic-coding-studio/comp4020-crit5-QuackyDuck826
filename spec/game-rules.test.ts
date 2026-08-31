@@ -124,6 +124,24 @@ describe("orbit reversal dodge: game rules", () => {
     expect(next.hazards.find((h) => h.id === 1)).toBeUndefined();
   });
 
+  it("does not collide with a hazard that is already telegraphing its despawn", () => {
+    const base = createInitialState({ rng: seeded(12) });
+    const hazard: Hazard = {
+      id: 1,
+      kind: "static",
+      angle: base.playerAngle,
+      direction: 1,
+      speed: 0,
+      spawnedAt: 0,
+      lifetime: 10,
+    };
+    const fadingState = { ...withHazards(base, [hazard]), time: 8.1 }; // final 20% of a 10s life
+    expect(checkCollision(fadingState)).toBe(false);
+
+    const next = tick(fadingState, 0.016);
+    expect(next.gameOver).toBe(false);
+  });
+
   it("telegraphs a hazard's despawn by shrinking/dimming over its final 20% of life", () => {
     const hazard: Hazard = { id: 1, kind: "static", angle: 0, direction: 1, speed: 0, spawnedAt: 0, lifetime: 10 };
     expect(isTelegraphing(hazard, 7.9)).toBe(false);

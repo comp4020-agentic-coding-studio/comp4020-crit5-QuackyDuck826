@@ -30,6 +30,32 @@ function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
 }
 
+function lerp(a: number, b: number, t: number): number {
+  return a + (b - a) * t;
+}
+
+// A hazard is born red, ages through orange into yellow over its lifetime,
+// then (via the telegraph alpha below) fades out — so its color alone tells
+// you how much longer it's safe to treat as a threat.
+const HAZARD_COLOR_STOPS: ReadonlyArray<readonly [number, Rgb]> = [
+  [0, [255, 70, 50]],
+  [0.5, [255, 150, 40]],
+  [1, [255, 225, 70]],
+];
+
+function hazardColor(ageFraction: number): Rgb {
+  const t = clamp(ageFraction, 0, 1);
+  for (let i = 0; i < HAZARD_COLOR_STOPS.length - 1; i++) {
+    const [t0, c0] = HAZARD_COLOR_STOPS[i];
+    const [t1, c1] = HAZARD_COLOR_STOPS[i + 1];
+    if (t <= t1) {
+      const localT = (t - t0) / (t1 - t0);
+      return [lerp(c0[0], c1[0], localT), lerp(c0[1], c1[1], localT), lerp(c0[2], c1[2], localT)];
+    }
+  }
+  return HAZARD_COLOR_STOPS[HAZARD_COLOR_STOPS.length - 1][1];
+}
+
 function pointOn(center: number, radius: number, angle: number): [number, number] {
   return [center + radius * Math.cos(angle), center + radius * Math.sin(angle)];
 }
@@ -99,6 +125,7 @@ function drawHazard(ctx: CanvasRenderingContext2D, hazard: Hazard, state: GameSt
   const telegraphing = isTelegraphing(hazard, state.time);
   const scale = telegraphing ? Math.max(0.15, lifeFraction / 0.2) : 1;
   const alpha = telegraphing ? Math.max(0.12, lifeFraction / 0.2) : 1;
+  const color = hazardColor(1 - lifeFraction);
   const r = ringRadius * HAZARD_RADIUS_FRACTION * scale;
   const [x, y] = pointOn(center, ringRadius, hazard.angle);
 
@@ -106,15 +133,15 @@ function drawHazard(ctx: CanvasRenderingContext2D, hazard: Hazard, state: GameSt
     for (let i = 4; i >= 1; i--) {
       const trailAngle = hazard.angle - hazard.direction * i * 0.05;
       const [tx, ty] = pointOn(center, ringRadius, trailAngle);
-      ctx.fillStyle = rgba(COLORS.danger, alpha * (0.28 - i * 0.045));
+      ctx.fillStyle = rgba(color, alpha * (0.28 - i * 0.045));
       ctx.beginPath();
       ctx.arc(tx, ty, r * 0.6, 0, Math.PI * 2);
       ctx.fill();
     }
     const heading = hazard.angle + hazard.direction * (Math.PI / 2);
-    drawTriangle(ctx, x, y, r, heading, rgba(COLORS.danger, alpha));
+    drawTriangle(ctx, x, y, r, heading, rgba(color, alpha));
   } else {
-    drawDiamond(ctx, x, y, r, rgba(COLORS.danger, alpha));
+    drawDiamond(ctx, x, y, r, rgba(color, alpha));
   }
 }
 
