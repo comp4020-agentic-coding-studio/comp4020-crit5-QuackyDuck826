@@ -3,6 +3,7 @@ import {
   checkCollision,
   CLOSE_CALL_BONUS,
   createInitialState,
+  EFFECT_DURATION,
   handleInput,
   hazardLifeFraction,
   isTelegraphing,
@@ -163,6 +164,26 @@ describe("orbit reversal dodge: game rules", () => {
     expect(again.score).toBe(CLOSE_CALL_BONUS);
   });
 
+  it("plays a close-call effect that expires after EFFECT_DURATION", () => {
+    const base = createInitialState({ rng: seeded(16) });
+    const hazard: Hazard = {
+      id: 1,
+      kind: "static",
+      angle: base.playerAngle,
+      direction: 1,
+      speed: 0,
+      spawnedAt: 0,
+      lifetime: 10,
+    };
+    const state = { ...withHazards(base, [hazard]), time: 8.1 };
+    const next = tick(state, 0.016);
+    expect(next.effects.length).toBe(1);
+    expect(next.effects[0].kind).toBe("close-call");
+
+    const expired = tick(next, EFFECT_DURATION + 0.1);
+    expect(expired.effects.length).toBe(0);
+  });
+
   it("pays a last-second bonus for reversing right next to a live hazard", () => {
     const base = createInitialState({ rng: seeded(15) });
     const hazard: Hazard = {
@@ -180,6 +201,23 @@ describe("orbit reversal dodge: game rules", () => {
 
     const reversedAgain = handleInput(reversed); // already awarded for this hazard: no double-dipping
     expect(reversedAgain.score).toBe(LAST_SECOND_BONUS);
+  });
+
+  it("plays a last-second effect distinct from a close-call effect", () => {
+    const base = createInitialState({ rng: seeded(17) });
+    const hazard: Hazard = {
+      id: 1,
+      kind: "static",
+      angle: base.playerAngle,
+      direction: 1,
+      speed: 0,
+      spawnedAt: 0,
+      lifetime: 100,
+    };
+    const state = withHazards(base, [hazard]);
+    const reversed = handleInput(state);
+    expect(reversed.effects.length).toBe(1);
+    expect(reversed.effects[0].kind).toBe("last-second");
   });
 
   it("does not collide with a hazard that is already telegraphing its despawn", () => {

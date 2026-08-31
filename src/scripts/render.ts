@@ -2,11 +2,13 @@
 // procedurally from angle + direction rather than stored history, so state
 // stays plain data.
 import {
+  EFFECT_DURATION,
   HAZARD_RADIUS_FRACTION,
   hazardLifeFraction,
   isTelegraphing,
   PLAYER_RADIUS_FRACTION,
   warningProgress,
+  type Effect,
   type GameState,
   type Hazard,
   type PendingSpawn,
@@ -22,6 +24,9 @@ const COLORS = {
   score: [200, 230, 255] as Rgb,
   planetCore: [90, 170, 230] as Rgb,
   planetEdge: [8, 12, 26] as Rgb,
+  star: [200, 225, 255] as Rgb,
+  closeCall: [110, 255, 210] as Rgb,
+  lastSecond: [255, 221, 90] as Rgb,
 };
 
 function rgba([r, g, b]: Rgb, a: number): string {
@@ -79,6 +84,28 @@ function roundedRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: num
   ctx.closePath();
 }
 
+// A fixed field of background stars, positioned by hashing the index rather
+// than Math.random(), so the same star sits in the same spot every frame —
+// only their twinkle (driven by state.time) moves.
+const STAR_COUNT = 70;
+
+function hash(n: number): number {
+  const s = Math.sin(n * 12.9898) * 43758.5453;
+  return s - Math.floor(s);
+}
+
+function drawStars(ctx: CanvasRenderingContext2D, state: GameState, size: number) {
+  for (let i = 0; i < STAR_COUNT; i++) {
+    const fx = hash(i * 1.618);
+    const fy = hash(i * 2.718 + 4.2);
+    const twinkle = 0.5 + 0.5 * Math.sin(state.time * (0.5 + fx) + i * 3.1);
+    ctx.fillStyle = rgba(COLORS.star, 0.12 + twinkle * 0.35);
+    ctx.beginPath();
+    ctx.arc(fx * size, fy * size, size * (0.0012 + fy * 0.0022), 0, Math.PI * 2);
+    ctx.fill();
+  }
+}
+
 // What everything else orbits: a shaded core plus rings of light that ripple
 // outward on a loop, so the center of the board reads as alive rather than
 // empty space inside the ring.
@@ -134,10 +161,14 @@ function drawPlayer(
     ctx.fill();
   }
   const [px, py] = pointOn(center, ringRadius, state.playerAngle);
+  ctx.save();
+  ctx.shadowColor = rgba(COLORS.player, alpha * 0.9);
+  ctx.shadowBlur = r * 2.2;
   ctx.fillStyle = rgba(COLORS.player, alpha);
   ctx.beginPath();
   ctx.arc(px, py, r, 0, Math.PI * 2);
   ctx.fill();
+  ctx.restore();
 }
 
 function drawTriangle(
@@ -186,6 +217,10 @@ function drawHazard(ctx: CanvasRenderingContext2D, hazard: Hazard, state: GameSt
   const r = ringRadius * HAZARD_RADIUS_FRACTION * scale;
   const [x, y] = pointOn(center, ringRadius, hazard.angle);
 
+  ctx.save();
+  ctx.shadowColor = rgba(color, alpha * 0.8);
+  ctx.shadowBlur = r * 1.8;
+
   if (hazard.kind === "moving") {
     for (let i = 4; i >= 1; i--) {
       const trailAngle = hazard.angle - hazard.direction * i * 0.05;
@@ -202,6 +237,7 @@ function drawHazard(ctx: CanvasRenderingContext2D, hazard: Hazard, state: GameSt
     // on the orbit path rather than just stamped over it.
     drawDiamond(ctx, x, y, r, hazard.angle, rgba(color, alpha));
   }
+  ctx.restore();
 }
 
 // The warning: a large ring at the hazard's future spot that shrinks down to
@@ -227,6 +263,55 @@ function drawPendingSpawn(
   ctx.beginPath();
   ctx.arc(x, y, r, 0, Math.PI * 2);
   ctx.stroke();
+}
+
+// A close call gets a cool burst (you were fine, that fading hazard couldn't
+// hurt you anyway); a last-second reversal gets a hotter, sharper one (that
+// was a real dodge). Both play out as an expanding shockwave, a few
+// radiating spark lines, and a "+N" popup drifting outward as they fade.
+function drawEffect(ctx: CanvasRenderingContext2D, effect: Effect, state: GameState, center: number, ringRadius: number) {
+  const t = clamp((state.time - effect.triggeredAt) / EFFECT_DURATION, 0, 1);
+  const color = effect.kind === "last-second" ? COLORS.lastSecond : COLORS.closeCall;
+  const fade = 1 - t;
+  const [x, y] = pointOn(center, ringRadius, effect.angle);
+
+  ctx.save();
+  ctx.shadowColor = rgba(color, fade * 0.8);
+  ctx.shadowBlur = ringRadius * 0.08;
+
+  const shockR = ringRadius * (0.05 + 0.24 * t);
+  ctx.strokeStyle = rgba(color, fade * 0.9);
+  ctx.lineWidth = Math.max(1, ringRadius * 0.025 * fade);
+  ctx.beginPath();
+  ctx.arc(x, y, shockR, 0, Math.PI * 2);
+  ctx.stroke();
+
+  const rayCount = effect.kind === "last-second" ? 8 : 6;
+  const innerR = ringRadius * 0.02;
+  const rayLen = ringRadius * (0.05 + 0.16 * t);
+  for (let i = 0; i < rayCount; i++) {
+    const a = (i / rayCount) * Math.PI * 2 + t * 1.6;
+    const ix = x + Math.cos(a) * innerR;
+    const iy = y + Math.sin(a) * innerR;
+    const ox = x + Math.cos(a) * (innerR + rayLen);
+    const oy = y + Math.sin(a) * (innerR + rayLen);
+    ctx.strokeStyle = rgba(color, fade * 0.85);
+    ctx.lineWidth = Math.max(1, ringRadius * 0.014 * fade);
+    ctx.beginPath();
+    ctx.moveTo(ix, iy);
+    ctx.lineTo(ox, oy);
+    ctx.stroke();
+  }
+
+  const [lx, ly] = pointOn(center, ringRadius * (1 + 0.14 * t), effect.angle);
+  ctx.shadowBlur = 0;
+  ctx.fillStyle = rgba(color, fade);
+  ctx.font = `700 ${Math.round(ringRadius * 0.09)}px system-ui, sans-serif`;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText(`+${effect.amount}`, lx, ly);
+
+  ctx.restore();
 }
 
 function drawScore(ctx: CanvasRenderingContext2D, state: GameState, size: number) {
@@ -281,13 +366,18 @@ export function render(ctx: CanvasRenderingContext2D, state: GameState, size: nu
   ctx.fillStyle = rgba(COLORS.bg, 1);
   ctx.fillRect(0, 0, size, size);
 
+  drawStars(ctx, state, size);
   drawPlanet(ctx, state, center, ringRadius * 0.32, ringAlpha);
 
+  ctx.save();
+  ctx.shadowColor = rgba(COLORS.ring, ringAlpha * 0.5);
+  ctx.shadowBlur = size * 0.01;
   ctx.strokeStyle = rgba(COLORS.ring, ringAlpha * 0.6);
   ctx.lineWidth = Math.max(1, size * 0.002);
   ctx.beginPath();
   ctx.arc(center, center, ringRadius, 0, Math.PI * 2);
   ctx.stroke();
+  ctx.restore();
 
   for (const pending of state.pendingSpawns) {
     drawPendingSpawn(ctx, pending, state, center, ringRadius);
@@ -299,6 +389,10 @@ export function render(ctx: CanvasRenderingContext2D, state: GameState, size: nu
 
   if (ringAlpha > 0.02) {
     drawPlayer(ctx, state, center, ringRadius, ringAlpha);
+  }
+
+  for (const effect of state.effects) {
+    drawEffect(ctx, effect, state, center, ringRadius);
   }
 
   drawScore(ctx, state, size);

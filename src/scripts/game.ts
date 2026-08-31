@@ -18,6 +18,18 @@ export interface Hazard {
 
 export type IntroStage = "moving-intro" | "static-intro" | "both";
 
+export type EffectKind = "close-call" | "last-second";
+
+// A one-shot visual beat for a bonus moment — rendering plays it out over
+// EFFECT_DURATION and then it's pruned, same lifecycle as a hazard.
+export interface Effect {
+  id: number;
+  kind: EffectKind;
+  angle: number;
+  amount: number;
+  triggeredAt: number;
+}
+
 // A hazard on approach: nothing here can collide with the player. It's the
 // warning — a large circle at the hazard's future position and kind, which
 // shrinks down to that hazard's actual size by `spawnAt`, when it turns into
@@ -42,6 +54,7 @@ export interface GameState {
   tier: number;
   hazards: Hazard[];
   pendingSpawns: PendingSpawn[];
+  effects: Effect[];
   nextId: number;
   gameOver: boolean;
   gameOverAt: number | null;
@@ -93,6 +106,9 @@ const LAST_SECOND_ANGLE = HIT_ANGLE * 2.5;
 // actually appears and becomes dangerous.
 export const WARNING_DURATION = 1.1;
 
+// How long a close-call/last-second visual beat plays before it's pruned.
+export const EFFECT_DURATION = 0.7;
+
 export function normalizeAngle(angle: number): number {
   const twoPi = Math.PI * 2;
   return ((angle % twoPi) + twoPi) % twoPi;
@@ -136,6 +152,7 @@ export function createInitialState(options: { rng?: () => number } = {}): GameSt
     tier: 0,
     hazards: [],
     pendingSpawns: [],
+    effects: [],
     nextId: 0,
     gameOver: false,
     gameOverAt: null,
@@ -249,6 +266,8 @@ export function tick(state: GameState, dt: number): GameState {
   // A close call: the player grazed a hazard while it was already fading out
   // (harmless, but still a bonus for cutting it close), paid once per hazard.
   let closeCallBonus = 0;
+  let nextId = state.nextId;
+  const newEffects: Effect[] = [];
   const graded = moved.map((hazard) => {
     if (
       !hazard.closeCallAwarded &&
@@ -256,6 +275,13 @@ export function tick(state: GameState, dt: number): GameState {
       angularDistance(hazard.angle, playerAngle) < CLOSE_CALL_ANGLE
     ) {
       closeCallBonus += CLOSE_CALL_BONUS;
+      newEffects.push({
+        id: nextId++,
+        kind: "close-call",
+        angle: hazard.angle,
+        amount: CLOSE_CALL_BONUS,
+        triggeredAt: time,
+      });
       return { ...hazard, closeCallAwarded: true };
     }
     return hazard;
@@ -263,6 +289,7 @@ export function tick(state: GameState, dt: number): GameState {
 
   const survivedCount = graded.filter((hazard) => time - hazard.spawnedAt >= hazard.lifetime).length;
   const hazards = graded.filter((hazard) => time - hazard.spawnedAt < hazard.lifetime);
+  const effects = [...state.effects.filter((effect) => time - effect.triggeredAt < EFFECT_DURATION), ...newEffects];
 
   let next: GameState = {
     ...state,
@@ -270,6 +297,8 @@ export function tick(state: GameState, dt: number): GameState {
     tier: tierIndexForTime(time),
     playerAngle,
     hazards,
+    effects,
+    nextId,
     score: state.score + closeCallBonus + survivedCount * POINTS_PER_SURVIVED_HAZARD,
   };
 
@@ -293,6 +322,8 @@ export function handleInput(state: GameState): GameState {
   // A last-second dodge: reversing while a live (non-fading) hazard is right
   // there is what reversal is for, so it's worth a bonus, paid once per hazard.
   let lastSecondBonus = 0;
+  let nextId = state.nextId;
+  const newEffects: Effect[] = [];
   const hazards = state.hazards.map((hazard) => {
     if (
       !hazard.lastSecondAwarded &&
@@ -300,6 +331,13 @@ export function handleInput(state: GameState): GameState {
       angularDistance(hazard.angle, state.playerAngle) < LAST_SECOND_ANGLE
     ) {
       lastSecondBonus += LAST_SECOND_BONUS;
+      newEffects.push({
+        id: nextId++,
+        kind: "last-second",
+        angle: state.playerAngle,
+        amount: LAST_SECOND_BONUS,
+        triggeredAt: state.time,
+      });
       return { ...hazard, lastSecondAwarded: true };
     }
     return hazard;
@@ -308,6 +346,8 @@ export function handleInput(state: GameState): GameState {
   return {
     ...state,
     hazards,
+    effects: [...state.effects, ...newEffects],
+    nextId,
     playerDirection: state.playerDirection === 1 ? -1 : 1,
     score: state.score + lastSecondBonus,
   };
