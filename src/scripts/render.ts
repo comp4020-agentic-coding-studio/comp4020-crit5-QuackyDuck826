@@ -1,7 +1,16 @@
 // Canvas rendering — reads GameState, never mutates it. Trails are drawn
 // procedurally from angle + direction rather than stored history, so state
 // stays plain data.
-import { hazardLifeFraction, hazardSpawnFraction, isTelegraphing, type GameState, type Hazard } from "./game";
+import {
+  HAZARD_RADIUS_FRACTION,
+  hazardLifeFraction,
+  isTelegraphing,
+  PLAYER_RADIUS_FRACTION,
+  warningProgress,
+  type GameState,
+  type Hazard,
+  type PendingSpawn,
+} from "./game";
 
 type Rgb = readonly [number, number, number];
 
@@ -37,10 +46,9 @@ function drawPlayer(
   state: GameState,
   center: number,
   ringRadius: number,
-  size: number,
   alpha: number,
 ) {
-  const r = size * 0.018;
+  const r = ringRadius * PLAYER_RADIUS_FRACTION;
   for (let i = 6; i >= 1; i--) {
     const trailAngle = state.playerAngle - state.playerDirection * i * 0.045;
     const [x, y] = pointOn(center, ringRadius, trailAngle);
@@ -86,22 +94,12 @@ function drawDiamond(ctx: CanvasRenderingContext2D, x: number, y: number, r: num
   ctx.restore();
 }
 
-function drawHazard(
-  ctx: CanvasRenderingContext2D,
-  hazard: Hazard,
-  state: GameState,
-  center: number,
-  ringRadius: number,
-  size: number,
-) {
+function drawHazard(ctx: CanvasRenderingContext2D, hazard: Hazard, state: GameState, center: number, ringRadius: number) {
   const lifeFraction = hazardLifeFraction(hazard, state.time);
   const telegraphing = isTelegraphing(hazard, state.time);
-  const endScale = telegraphing ? Math.max(0.15, lifeFraction / 0.2) : 1;
-  const endAlpha = telegraphing ? Math.max(0.12, lifeFraction / 0.2) : 1;
-  const spawnFraction = hazardSpawnFraction(hazard, state.time);
-  const scale = spawnFraction * endScale;
-  const alpha = spawnFraction * endAlpha;
-  const r = size * 0.016 * scale;
+  const scale = telegraphing ? Math.max(0.15, lifeFraction / 0.2) : 1;
+  const alpha = telegraphing ? Math.max(0.12, lifeFraction / 0.2) : 1;
+  const r = ringRadius * HAZARD_RADIUS_FRACTION * scale;
   const [x, y] = pointOn(center, ringRadius, hazard.angle);
 
   if (hazard.kind === "moving") {
@@ -118,6 +116,31 @@ function drawHazard(
   } else {
     drawDiamond(ctx, x, y, r, rgba(COLORS.danger, alpha));
   }
+}
+
+// The warning: a large ring at the hazard's future spot that shrinks down to
+// its actual size by the time it spawns, so a new hazard never appears
+// without notice.
+const WARNING_START_SCALE = 6;
+
+function drawPendingSpawn(
+  ctx: CanvasRenderingContext2D,
+  pending: PendingSpawn,
+  state: GameState,
+  center: number,
+  ringRadius: number,
+) {
+  const progress = warningProgress(pending, state.time);
+  const targetR = ringRadius * HAZARD_RADIUS_FRACTION;
+  const r = targetR * WARNING_START_SCALE + (targetR - targetR * WARNING_START_SCALE) * progress;
+  const alpha = 0.18 + 0.32 * progress;
+  const [x, y] = pointOn(center, ringRadius, pending.angle);
+
+  ctx.strokeStyle = rgba(COLORS.danger, alpha);
+  ctx.lineWidth = Math.max(1, ringRadius * 0.006);
+  ctx.beginPath();
+  ctx.arc(x, y, r, 0, Math.PI * 2);
+  ctx.stroke();
 }
 
 function drawScore(ctx: CanvasRenderingContext2D, state: GameState, size: number) {
@@ -154,12 +177,16 @@ export function render(ctx: CanvasRenderingContext2D, state: GameState, size: nu
   ctx.arc(center, center, ringRadius, 0, Math.PI * 2);
   ctx.stroke();
 
+  for (const pending of state.pendingSpawns) {
+    drawPendingSpawn(ctx, pending, state, center, ringRadius);
+  }
+
   for (const hazard of state.hazards) {
-    drawHazard(ctx, hazard, state, center, ringRadius, size);
+    drawHazard(ctx, hazard, state, center, ringRadius);
   }
 
   if (ringAlpha > 0.02) {
-    drawPlayer(ctx, state, center, ringRadius, size, ringAlpha);
+    drawPlayer(ctx, state, center, ringRadius, ringAlpha);
   }
 
   drawScore(ctx, state, size);

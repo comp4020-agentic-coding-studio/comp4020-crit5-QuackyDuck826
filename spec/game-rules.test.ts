@@ -4,14 +4,15 @@ import {
   createInitialState,
   handleInput,
   hazardLifeFraction,
-  isSpawning,
   isTelegraphing,
-  SPAWN_FADE_DURATION,
   tick,
   tierIndexForTime,
   TIERS,
+  warningProgress,
+  WARNING_DURATION,
   type GameState,
   type Hazard,
+  type PendingSpawn,
 } from "../src/scripts/game";
 
 // Rule tests for Orbit Reversal Dodge's pure game logic — one per rule in the
@@ -70,7 +71,7 @@ describe("orbit reversal dodge: game rules", () => {
       angle: base.playerAngle,
       direction: 1,
       speed: 0,
-      spawnedAt: -1, // already fully faded in, so this isolates the collision rule
+      spawnedAt: 0,
       lifetime: 100,
     };
     const state = withHazards(base, [hazard]);
@@ -138,7 +139,7 @@ describe("orbit reversal dodge: game rules", () => {
       angle: base.playerAngle,
       direction: 1,
       speed: 0,
-      spawnedAt: -1,
+      spawnedAt: 0,
       lifetime: 100,
     };
     let state = withHazards(base, [hazard]);
@@ -154,51 +155,91 @@ describe("orbit reversal dodge: game rules", () => {
     expect(restarted.time).toBe(0);
   });
 
-  it("marks a hazard as spawning only for a brief window right after it appears", () => {
-    const hazard: Hazard = { id: 1, kind: "static", angle: 0, direction: 1, speed: 0, spawnedAt: 5, lifetime: 100 };
-    expect(isSpawning(hazard, 5)).toBe(true);
-    expect(isSpawning(hazard, 5 + SPAWN_FADE_DURATION - 0.01)).toBe(true);
-    expect(isSpawning(hazard, 5 + SPAWN_FADE_DURATION + 0.01)).toBe(false);
-  });
-
-  it("does not collide with a hazard that is still fading in, but does once it has fully appeared", () => {
+  it("warns before a hazard appears, and a warning cannot itself collide with the player", () => {
     const base = createInitialState({ rng: seeded(10) });
-    const freshHazard: Hazard = {
+    const pending: PendingSpawn = {
       id: 1,
       kind: "static",
-      angle: base.playerAngle,
+      angle: base.playerAngle, // sitting right on top of the player
       direction: 1,
       speed: 0,
-      spawnedAt: 0,
       lifetime: 100,
+      scheduledAt: 0,
+      spawnAt: WARNING_DURATION,
     };
-    const spawning = withHazards({ ...base, time: 0.01 }, [freshHazard]);
-    expect(checkCollision(spawning)).toBe(false);
+    const state = { ...base, pendingSpawns: [pending] };
+    expect(checkCollision(state)).toBe(false);
 
-    const spawned = withHazards({ ...base, time: SPAWN_FADE_DURATION + 0.01 }, [freshHazard]);
-    expect(checkCollision(spawned)).toBe(true);
+    const next = tick(state, 0.016);
+    expect(next.gameOver).toBe(false);
+    expect(next.hazards.length).toBe(0);
   });
 
-  it("teaches by sequencing: the first hazard is the moving kind, introduced after a grace period", () => {
+  it("hatches a pending spawn into a real, collidable hazard once its warning finishes", () => {
+    const base = createInitialState({ rng: seeded(11) });
+    const pending: PendingSpawn = {
+      id: 1,
+      kind: "static",
+      angle: base.playerAngle + Math.PI, // safely away from the player
+      direction: 1,
+      speed: 0,
+      lifetime: 100,
+      scheduledAt: 0,
+      spawnAt: WARNING_DURATION,
+    };
+    const state = { ...base, pendingSpawns: [pending] };
+    const next = tick(state, WARNING_DURATION + 0.1);
+    expect(next.pendingSpawns.length).toBe(0);
+    expect(next.hazards.length).toBe(1);
+    expect(next.hazards[0].kind).toBe("static");
+  });
+
+  it("shows a warning's progress climbing from 0 at scheduling to 1 at spawn", () => {
+    const pending: PendingSpawn = {
+      id: 1,
+      kind: "moving",
+      angle: 0,
+      direction: 1,
+      speed: 1,
+      lifetime: 10,
+      scheduledAt: 2,
+      spawnAt: 2 + WARNING_DURATION,
+    };
+    expect(warningProgress(pending, 2)).toBe(0);
+    expect(warningProgress(pending, 2 + WARNING_DURATION)).toBe(1);
+    expect(warningProgress(pending, 2 + WARNING_DURATION / 2)).toBeCloseTo(0.5, 5);
+  });
+
+  it("teaches by sequencing: the first warning is for the moving kind, after a grace period", () => {
     let state = createInitialState({ rng: seeded(7) });
-    state = tick(state, 1.0);
+    state = tick(state, 1.0); // before the grace period
+    expect(state.pendingSpawns.length).toBe(0);
     expect(state.hazards.length).toBe(0);
 
-    state = tick(state, 1.0);
+    state = tick(state, 1.0); // past the grace period: a warning appears, not yet a hazard
+    expect(state.pendingSpawns.length).toBe(1);
+    expect(state.pendingSpawns[0].kind).toBe("moving");
+    expect(state.hazards.length).toBe(0);
+
+    state = tick(state, WARNING_DURATION + 0.1); // the warning resolves into the actual hazard
     expect(state.hazards.length).toBe(1);
     expect(state.hazards[0].kind).toBe("moving");
   });
 
-  it("only spawns hazards together after each kind has been introduced once", () => {
+  it("only spawns hazards together after each kind has actually appeared once", () => {
     let state = createInitialState({ rng: seeded(9) });
     expect(state.introStage).toBe("moving-intro");
 
-    state = tick(state, 2);
+    state = tick(state, 2); // moving warning scheduled, but the stage hasn't advanced yet
+    expect(state.introStage).toBe("moving-intro");
+
+    state = tick(state, WARNING_DURATION + 0.1); // moving hazard hatches
     expect(state.introStage).toBe("static-intro");
     expect(state.hazards.some((h) => h.kind === "moving")).toBe(true);
     expect(state.hazards.some((h) => h.kind === "static")).toBe(false);
 
-    state = tick(state, 3);
+    state = tick(state, 3); // past the static intro gap: its warning is scheduled
+    state = tick(state, WARNING_DURATION + 0.1); // and now resolves into the hazard
     expect(state.introStage).toBe("both");
     expect(state.hazards.some((h) => h.kind === "static")).toBe(true);
   });
