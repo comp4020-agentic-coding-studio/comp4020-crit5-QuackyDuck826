@@ -204,12 +204,14 @@ function drawPlayer(
   alpha: number,
 ) {
   const r = ringRadius * PLAYER_RADIUS_FRACTION;
-  for (let i = 6; i >= 1; i--) {
+  for (let i = 8; i >= 1; i--) {
     const trailAngle = state.playerAngle - state.playerDirection * i * 0.045;
-    const [x, y] = pointOn(center, ringRadius, trailAngle);
-    ctx.fillStyle = rgba(COLORS.player, alpha * (0.35 - i * 0.045));
+    const wobble = Math.sin(state.time * 9 - i * 1.4);
+    const flicker = 0.75 + 0.25 * Math.sin(state.time * 6 - i * 0.9);
+    const [x, y] = pointOn(center, ringRadius + wobble * r * 0.5, trailAngle);
+    ctx.fillStyle = rgba(COLORS.player, alpha * (0.4 - i * 0.04) * flicker);
     ctx.beginPath();
-    ctx.arc(x, y, r * (1 - i * 0.08), 0, Math.PI * 2);
+    ctx.arc(x, y, r * (1 - i * 0.07) * flicker, 0, Math.PI * 2);
     ctx.fill();
   }
   const [px, py] = pointOn(center, ringRadius, state.playerAngle);
@@ -276,10 +278,12 @@ function drawHazard(ctx: CanvasRenderingContext2D, hazard: Hazard, state: GameSt
   if (hazard.kind === "moving") {
     for (let i = 4; i >= 1; i--) {
       const trailAngle = hazard.angle - hazard.direction * i * 0.05;
-      const [tx, ty] = pointOn(center, ringRadius, trailAngle);
-      ctx.fillStyle = rgba(color, alpha * (0.28 - i * 0.045));
+      const wobble = Math.sin(state.time * 7 + hazard.id * 1.7 - i * 1.1);
+      const flicker = 0.7 + 0.3 * Math.sin(state.time * 5 + hazard.id - i * 0.8);
+      const [tx, ty] = pointOn(center, ringRadius + wobble * r * 0.4, trailAngle);
+      ctx.fillStyle = rgba(color, alpha * (0.28 - i * 0.045) * flicker);
       ctx.beginPath();
-      ctx.arc(tx, ty, r * 0.6, 0, Math.PI * 2);
+      ctx.arc(tx, ty, r * 0.6 * flicker, 0, Math.PI * 2);
       ctx.fill();
     }
     const heading = hazard.angle + hazard.direction * (Math.PI / 2);
@@ -436,11 +440,16 @@ export function render(ctx: CanvasRenderingContext2D, state: GameState, size: nu
     state.lastReversedAt === null ? Infinity : state.time - state.lastReversedAt;
   const pulse = Math.max(0, 1 - sinceReversal / REVERSAL_PULSE_DURATION);
 
+  // The widest (soft-band) ring's rest thickness is pinned to the player's
+  // own size — 1.5x its diameter — so the two read as scaled together.
+  const playerDiameter = ringRadius * PLAYER_RADIUS_FRACTION * 2;
+  const widestRingWidth = playerDiameter * 1.5;
+
   ctx.save();
   // A wide, faint band gives the path a soft glow-halo, then a thin line on
   // top marks its exact radius — both kept low-contrast against the bg.
   ctx.strokeStyle = rgba(COLORS.ring, ringAlpha * (0.08 + 0.1 * pulse));
-  ctx.lineWidth = size * (0.032 + 0.012 * pulse);
+  ctx.lineWidth = widestRingWidth * (1 + 0.15 * pulse);
   ctx.beginPath();
   ctx.arc(center, center, ringRadius, 0, Math.PI * 2);
   ctx.stroke();

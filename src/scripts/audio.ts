@@ -10,6 +10,22 @@ const MUSIC_BASE_INTERVAL = 0.85; // seconds between notes at the start of a run
 const MUSIC_MIN_INTERVAL = 0.32; // seconds between notes once fully ramped up
 const MUSIC_RAMP_SECONDS = 90; // how long it takes to reach the fastest tempo
 const SCHEDULE_AHEAD = 0.2; // seconds of lookahead per tick
+const BITCRUSH_STEPS = 5; // low step count = an aggressive, lo-fi quantized crunch
+
+function lerp(a: number, b: number, t: number): number {
+  return a + (b - a) * t;
+}
+
+// A WaveShaper quantizing amplitude into a handful of discrete steps reads as
+// classic digital bitcrush distortion without needing an AudioWorklet.
+function makeBitcrushCurve(steps: number): Float32Array<ArrayBuffer> {
+  const curve = new Float32Array(new ArrayBuffer(1024 * Float32Array.BYTES_PER_ELEMENT));
+  for (let i = 0; i < 1024; i++) {
+    const x = (i / 1023) * 2 - 1;
+    curve[i] = Math.round(x * steps) / steps;
+  }
+  return curve;
+}
 
 export interface AudioEngine {
   unlock(): void;
@@ -28,6 +44,7 @@ export function createAudioEngine(): AudioEngine {
   let musicBus: GainNode;
   let sfxBus: GainNode;
   let delayIn: DelayNode;
+  let droneFilter: BiquadFilterNode | null = null;
   let nextNoteTime = 0;
   let patternIndex = 0;
   let droneStarted = false;
@@ -40,9 +57,17 @@ export function createAudioEngine(): AudioEngine {
     master.gain.value = 0.7;
     master.connect(ctx.destination);
 
+    // The whole music bed (drone + arpeggio) is quantized through a crusher
+    // before it reaches master — dramatic, lo-fi, digital grit under the
+    // cleaner sine SFX layered on top.
+    const bitcrush = ctx.createWaveShaper();
+    bitcrush.curve = makeBitcrushCurve(BITCRUSH_STEPS);
+    bitcrush.oversample = "none";
+    bitcrush.connect(master);
+
     musicBus = ctx.createGain();
     musicBus.gain.value = 0.4;
-    musicBus.connect(master);
+    musicBus.connect(bitcrush);
 
     sfxBus = ctx.createGain();
     sfxBus.gain.value = 0.9;
@@ -142,8 +167,10 @@ export function createAudioEngine(): AudioEngine {
 
     const filter = audio.createBiquadFilter();
     filter.type = "lowpass";
-    filter.frequency.value = 400;
+    filter.frequency.value = 300;
+    filter.Q.value = 0.7;
     filter.connect(musicBus);
+    droneFilter = filter;
 
     const lfo = audio.createOscillator();
     lfo.frequency.value = 0.07;
@@ -159,31 +186,51 @@ export function createAudioEngine(): AudioEngine {
       osc.frequency.value = 55;
       osc.detune.value = detune;
       const gain = audio.createGain();
-      gain.gain.value = 0.05;
+      gain.gain.value = 0.06;
       osc.connect(gain);
       gain.connect(filter);
       osc.start();
     }
   }
 
-  function playArpeggioNote(interval: number) {
-    const step = ARPEGGIO_PATTERN[patternIndex % ARPEGGIO_PATTERN.length];
+  function playSubThump(t0: number, rampT: number) {
+    const audio = ensureCtx();
+    const osc = audio.createOscillator();
+    osc.type = "sine";
+    osc.frequency.setValueAtTime(95, t0);
+    osc.frequency.exponentialRampToValueAtTime(42, t0 + 0.3);
+    const gain = audio.createGain();
+    gain.gain.setValueAtTime(0.16 + 0.12 * rampT, t0);
+    gain.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.32);
+    osc.connect(gain);
+    gain.connect(musicBus);
+    osc.start(t0);
+    osc.stop(t0 + 0.34);
+  }
+
+  function playArpeggioNote(interval: number, rampT: number) {
+    const loopIndex = patternIndex % ARPEGGIO_PATTERN.length;
+    const step = ARPEGGIO_PATTERN[loopIndex];
     patternIndex++;
     const freq = ARPEGGIO_SCALE[step];
     const audio = ensureCtx();
     const t0 = nextNoteTime;
+    if (loopIndex === 0) playSubThump(t0, rampT);
 
+    // Pure sine, no detune: a plainer, more "sine-wavey" tone than the old
+    // triangle, with the crusher above doing the work of adding character.
     const osc = audio.createOscillator();
-    osc.type = "triangle";
+    osc.type = "sine";
     osc.frequency.value = freq;
 
     const filter = audio.createBiquadFilter();
     filter.type = "lowpass";
-    filter.frequency.value = 1400;
+    filter.frequency.value = lerp(900, 3200, rampT);
+    filter.Q.value = lerp(0.6, 5, rampT);
 
     const gain = audio.createGain();
     gain.gain.setValueAtTime(0, t0);
-    gain.gain.linearRampToValueAtTime(0.12, t0 + 0.01);
+    gain.gain.linearRampToValueAtTime(0.14 + 0.06 * rampT, t0 + 0.01);
     gain.gain.exponentialRampToValueAtTime(0.0001, t0 + interval * 0.85);
 
     osc.connect(filter);
@@ -273,9 +320,16 @@ export function createAudioEngine(): AudioEngine {
     tickMusic(runElapsed) {
       if (!ctx || nextNoteTime === 0) return;
       const rampT = Math.min(1, Math.max(0, runElapsed / MUSIC_RAMP_SECONDS));
-      const interval = MUSIC_BASE_INTERVAL + (MUSIC_MIN_INTERVAL - MUSIC_BASE_INTERVAL) * rampT;
+      const interval = lerp(MUSIC_BASE_INTERVAL, MUSIC_MIN_INTERVAL, rampT);
+
+      musicBus.gain.value = lerp(0.4, 0.62, rampT);
+      if (droneFilter) {
+        droneFilter.frequency.value = lerp(300, 650, rampT);
+        droneFilter.Q.value = lerp(0.7, 4.5, rampT);
+      }
+
       while (nextNoteTime < ctx.currentTime + SCHEDULE_AHEAD) {
-        playArpeggioNote(interval);
+        playArpeggioNote(interval, rampT);
         nextNoteTime += interval;
       }
     },
