@@ -12,6 +12,8 @@ export interface Hazard {
   speed: number; // rad/s, 0 for static hazards
   spawnedAt: number; // state.time at spawn
   lifetime: number; // seconds until despawn
+  closeCallAwarded?: boolean; // grazed it while it was fading — bonus paid once
+  lastSecondAwarded?: boolean; // reversed direction right next to it — bonus paid once
 }
 
 export type IntroStage = "moving-intro" | "static-intro" | "both";
@@ -78,6 +80,14 @@ const HITBOX_FRACTION = 0.8; // hitbox ~80% of visible sprite radius: near-misse
 const HIT_ANGLE = (PLAYER_RADIUS_FRACTION + HAZARD_RADIUS_FRACTION) * HITBOX_FRACTION;
 
 const TELEGRAPH_FRACTION = 0.2; // last 20% of life: hazard shrinks/dims
+
+// Scoring: points come from obstacles survived, not the clock, plus bonuses
+// for cutting it close on purpose.
+export const POINTS_PER_SURVIVED_HAZARD = 10;
+export const CLOSE_CALL_BONUS = 15; // passed within CLOSE_CALL_ANGLE of a fading hazard
+export const LAST_SECOND_BONUS = 15; // reversed within LAST_SECOND_ANGLE of a live hazard
+const CLOSE_CALL_ANGLE = HIT_ANGLE * 2.5;
+const LAST_SECOND_ANGLE = HIT_ANGLE * 2.5;
 
 // How long a warning circle is visible before the hazard it announces
 // actually appears and becomes dangerous.
@@ -229,25 +239,45 @@ export function tick(state: GameState, dt: number): GameState {
     return { ...state, time };
   }
 
+  const playerAngle = normalizeAngle(state.playerAngle + state.playerDirection * PLAYER_SPEED * dt);
+  const moved = state.hazards.map((hazard) =>
+    hazard.kind === "moving"
+      ? { ...hazard, angle: normalizeAngle(hazard.angle + hazard.direction * hazard.speed * dt) }
+      : hazard,
+  );
+
+  // A close call: the player grazed a hazard while it was already fading out
+  // (harmless, but still a bonus for cutting it close), paid once per hazard.
+  let closeCallBonus = 0;
+  const graded = moved.map((hazard) => {
+    if (
+      !hazard.closeCallAwarded &&
+      isTelegraphing(hazard, time) &&
+      angularDistance(hazard.angle, playerAngle) < CLOSE_CALL_ANGLE
+    ) {
+      closeCallBonus += CLOSE_CALL_BONUS;
+      return { ...hazard, closeCallAwarded: true };
+    }
+    return hazard;
+  });
+
+  const survivedCount = graded.filter((hazard) => time - hazard.spawnedAt >= hazard.lifetime).length;
+  const hazards = graded.filter((hazard) => time - hazard.spawnedAt < hazard.lifetime);
+
   let next: GameState = {
     ...state,
     time,
     tier: tierIndexForTime(time),
-    playerAngle: normalizeAngle(state.playerAngle + state.playerDirection * PLAYER_SPEED * dt),
-    hazards: state.hazards
-      .map((hazard) =>
-        hazard.kind === "moving"
-          ? { ...hazard, angle: normalizeAngle(hazard.angle + hazard.direction * hazard.speed * dt) }
-          : hazard,
-      )
-      .filter((hazard) => time - hazard.spawnedAt < hazard.lifetime),
+    playerAngle,
+    hazards,
+    score: state.score + closeCallBonus + survivedCount * POINTS_PER_SURVIVED_HAZARD,
   };
 
   next = maybeSpawn(next);
   next = hatchPendingSpawns(next);
 
   if (checkCollision(next)) {
-    next = { ...next, gameOver: true, gameOverAt: next.time, score: next.time };
+    next = { ...next, gameOver: true, gameOverAt: next.time };
   }
 
   return next;
@@ -259,5 +289,26 @@ export function handleInput(state: GameState): GameState {
     if (sinceGameOver < RESTART_DELAY) return state;
     return createInitialState({ rng: state.rng });
   }
-  return { ...state, playerDirection: state.playerDirection === 1 ? -1 : 1 };
+
+  // A last-second dodge: reversing while a live (non-fading) hazard is right
+  // there is what reversal is for, so it's worth a bonus, paid once per hazard.
+  let lastSecondBonus = 0;
+  const hazards = state.hazards.map((hazard) => {
+    if (
+      !hazard.lastSecondAwarded &&
+      !isTelegraphing(hazard, state.time) &&
+      angularDistance(hazard.angle, state.playerAngle) < LAST_SECOND_ANGLE
+    ) {
+      lastSecondBonus += LAST_SECOND_BONUS;
+      return { ...hazard, lastSecondAwarded: true };
+    }
+    return hazard;
+  });
+
+  return {
+    ...state,
+    hazards,
+    playerDirection: state.playerDirection === 1 ? -1 : 1,
+    score: state.score + lastSecondBonus,
+  };
 }

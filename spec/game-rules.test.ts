@@ -1,10 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
   checkCollision,
+  CLOSE_CALL_BONUS,
   createInitialState,
   handleInput,
   hazardLifeFraction,
   isTelegraphing,
+  LAST_SECOND_BONUS,
+  POINTS_PER_SURVIVED_HAZARD,
   tick,
   tierIndexForTime,
   TIERS,
@@ -122,6 +125,61 @@ describe("orbit reversal dodge: game rules", () => {
     const state = withHazards(base, [hazard]);
     const next = tick(state, 1.5);
     expect(next.hazards.find((h) => h.id === 1)).toBeUndefined();
+  });
+
+  it("scores points for surviving a hazard, not for time passing", () => {
+    const base = createInitialState({ rng: seeded(13) });
+    const hazard: Hazard = {
+      id: 1,
+      kind: "static",
+      angle: base.playerAngle + Math.PI,
+      direction: 1,
+      speed: 0,
+      spawnedAt: 0,
+      lifetime: 1,
+    };
+    const state = withHazards(base, [hazard]);
+    expect(tick(state, 0.5).score).toBe(0); // still alive: no points yet
+    expect(tick(state, 1.5).score).toBe(POINTS_PER_SURVIVED_HAZARD);
+  });
+
+  it("pays a close-call bonus for grazing a hazard while it's fading out", () => {
+    const base = createInitialState({ rng: seeded(14) });
+    const hazard: Hazard = {
+      id: 1,
+      kind: "static",
+      angle: base.playerAngle,
+      direction: 1,
+      speed: 0,
+      spawnedAt: 0,
+      lifetime: 10,
+    };
+    const state = { ...withHazards(base, [hazard]), time: 8.1 }; // fading, and right on the player
+    const next = tick(state, 0.016);
+    expect(next.score).toBe(CLOSE_CALL_BONUS);
+    expect(next.gameOver).toBe(false);
+
+    const again = tick(next, 0.016); // already awarded for this hazard: no double-dipping
+    expect(again.score).toBe(CLOSE_CALL_BONUS);
+  });
+
+  it("pays a last-second bonus for reversing right next to a live hazard", () => {
+    const base = createInitialState({ rng: seeded(15) });
+    const hazard: Hazard = {
+      id: 1,
+      kind: "static",
+      angle: base.playerAngle,
+      direction: 1,
+      speed: 0,
+      spawnedAt: 0,
+      lifetime: 100,
+    };
+    const state = withHazards(base, [hazard]);
+    const reversed = handleInput(state);
+    expect(reversed.score).toBe(LAST_SECOND_BONUS);
+
+    const reversedAgain = handleInput(reversed); // already awarded for this hazard: no double-dipping
+    expect(reversedAgain.score).toBe(LAST_SECOND_BONUS);
   });
 
   it("does not collide with a hazard that is already telegraphing its despawn", () => {

@@ -186,7 +186,7 @@ function drawScore(ctx: CanvasRenderingContext2D, state: GameState, size: number
   if (!state.gameOver) {
     ctx.fillStyle = rgba(COLORS.score, 0.75);
     ctx.font = `${Math.round(size * 0.028)}px system-ui, sans-serif`;
-    ctx.fillText(String(Math.floor(state.time)), size / 2, size * 0.04);
+    ctx.fillText(String(Math.floor(state.score)), size / 2, size * 0.04);
     return;
   }
 
