@@ -686,9 +686,11 @@ export function render(ctx: CanvasRenderingContext2D, state: GameState, size: nu
   // A wide, faint band gives the path a soft glow-halo — warped the same way
   // as the planet's surface, so it reads as part of the same living scene —
   // then a thin line on top marks the player's exact, perfectly circular
-  // orbit radius. Both kept low-contrast against the bg.
-  ctx.strokeStyle = rgba(COLORS.ring, ringAlpha * (0.08 + 0.1 * pulse));
-  ctx.lineWidth = widestRingWidth * (1 + 0.15 * pulse);
+  // orbit radius. Both kept low-contrast against the bg. Only the thin line
+  // carries the reversal flash — the wide band stays calm so the reversal
+  // reads as a crisp blink rather than the whole ring pulsing.
+  ctx.strokeStyle = rgba(COLORS.ring, ringAlpha * 0.08);
+  ctx.lineWidth = widestRingWidth;
   traceWarpedCircle(ctx, center, ringRadius, state.time, Math.PI);
   ctx.stroke();
 
