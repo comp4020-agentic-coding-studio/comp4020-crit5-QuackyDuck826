@@ -42,6 +42,7 @@ header nav span {
   letter-spacing: 0.02em;
 }
 
+header,
 main {
   display: contents;
 }
