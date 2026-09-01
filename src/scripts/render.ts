@@ -697,17 +697,30 @@ function drawScore(ctx: CanvasRenderingContext2D, state: GameState, size: number
   ctx.fillText("tap to try again", size / 2, size * 0.4 + fontSize * 0.9);
 }
 
+// Right after a (re)start, the planet and orbit ring grow in from nothing
+// instead of snapping straight to full size — softens the jump cut from the
+// game-over scene into a fresh run. The player itself isn't scaled by this:
+// it's already at its real orbit position from frame one, so the world
+// reads as materializing around it rather than the player popping in too.
+const GROW_IN_DURATION = 0.4;
+
+function growInFor(state: GameState): number {
+  const linear = clamp(state.time / GROW_IN_DURATION, 0, 1);
+  return 1 - Math.pow(1 - linear, 3);
+}
+
 export function render(ctx: CanvasRenderingContext2D, state: GameState, size: number) {
   const center = size / 2;
   const ringRadius = size * 0.36;
   const ringAlpha = ringAlphaFor(state);
+  const growIn = growInFor(state);
 
   ctx.fillStyle = rgba(COLORS.bg, 1);
   ctx.fillRect(0, 0, size, size);
 
   drawStars(ctx, state, size);
-  drawPlanet(ctx, state, center, ringRadius * 0.44, ringAlpha);
-  drawNoodleRings(ctx, state, center, ringRadius, ringAlpha);
+  drawPlanet(ctx, state, center, ringRadius * 0.44 * growIn, ringAlpha * growIn);
+  drawNoodleRings(ctx, state, center, ringRadius, ringAlpha * growIn);
 
   // A quick, small flare right after a direction change — the ring briefly
   // widens/brightens a touch, decaying back to its resting look.
@@ -721,6 +734,8 @@ export function render(ctx: CanvasRenderingContext2D, state: GameState, size: nu
   const playerDiameter = ringRadius * PLAYER_RADIUS_FRACTION * 2;
   const widestRingWidth = playerDiameter * 1.5;
 
+  const ringDrawRadius = ringRadius * growIn;
+
   ctx.save();
   // A wide, faint band gives the path a soft glow-halo — warped the same way
   // as the planet's surface, so it reads as part of the same living scene —
@@ -728,17 +743,17 @@ export function render(ctx: CanvasRenderingContext2D, state: GameState, size: nu
   // orbit radius. Both kept low-contrast against the bg. Only the thin line
   // carries the reversal flash — the wide band stays calm so the reversal
   // reads as a crisp blink rather than the whole ring pulsing.
-  ctx.strokeStyle = rgba(COLORS.ring, ringAlpha * 0.08);
+  ctx.strokeStyle = rgba(COLORS.ring, ringAlpha * 0.08 * growIn);
   ctx.lineWidth = widestRingWidth;
-  traceWarpedCircle(ctx, center, ringRadius, state.time, Math.PI);
+  traceWarpedCircle(ctx, center, ringDrawRadius, state.time, Math.PI);
   ctx.stroke();
 
-  ctx.shadowColor = rgba(COLORS.ring, ringAlpha * (0.25 + 0.2 * pulse));
+  ctx.shadowColor = rgba(COLORS.ring, ringAlpha * (0.25 + 0.2 * pulse) * growIn);
   ctx.shadowBlur = size * (0.008 + 0.01 * pulse);
-  ctx.strokeStyle = rgba(COLORS.ring, ringAlpha * (0.3 + 0.2 * pulse));
+  ctx.strokeStyle = rgba(COLORS.ring, ringAlpha * (0.3 + 0.2 * pulse) * growIn);
   ctx.lineWidth = Math.max(1, size * (0.0022 + 0.0016 * pulse));
   ctx.beginPath();
-  ctx.arc(center, center, ringRadius, 0, Math.PI * 2);
+  ctx.arc(center, center, ringDrawRadius, 0, Math.PI * 2);
   ctx.stroke();
   ctx.restore();
 
