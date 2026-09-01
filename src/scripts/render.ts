@@ -297,6 +297,13 @@ const NOODLE_RINGS: readonly NoodleRing[] = [
 const NOODLE_REVEAL_SCORE_STEP = 100;
 const NOODLE_REVEAL_FADE_RANGE = 20;
 
+// The soft glow band hugging the orbit line (drawn in render(), not part of
+// NOODLE_RINGS) joins the same build-up: hidden at the start, fading in
+// alongside the first noodle ring rather than being visible from frame one.
+function ringGlowRevealFor(state: GameState): number {
+  return clamp((state.score - NOODLE_REVEAL_SCORE_STEP) / NOODLE_REVEAL_FADE_RANGE, 0, 1);
+}
+
 function drawNoodleRings(
   ctx: CanvasRenderingContext2D,
   state: GameState,
@@ -735,6 +742,7 @@ export function render(ctx: CanvasRenderingContext2D, state: GameState, size: nu
   const widestRingWidth = playerDiameter * 1.5;
 
   const ringDrawRadius = ringRadius * growIn;
+  const ringGlowReveal = ringGlowRevealFor(state);
 
   ctx.save();
   // A wide, faint band gives the path a soft glow-halo — warped the same way
@@ -743,10 +751,12 @@ export function render(ctx: CanvasRenderingContext2D, state: GameState, size: nu
   // orbit radius. Both kept low-contrast against the bg. Only the thin line
   // carries the reversal flash — the wide band stays calm so the reversal
   // reads as a crisp blink rather than the whole ring pulsing.
-  ctx.strokeStyle = rgba(COLORS.ring, ringAlpha * 0.08 * growIn);
-  ctx.lineWidth = widestRingWidth;
-  traceWarpedCircle(ctx, center, ringDrawRadius, state.time, Math.PI);
-  ctx.stroke();
+  if (ringGlowReveal > 0) {
+    ctx.strokeStyle = rgba(COLORS.ring, ringAlpha * 0.08 * growIn * ringGlowReveal);
+    ctx.lineWidth = widestRingWidth;
+    traceWarpedCircle(ctx, center, ringDrawRadius, state.time, Math.PI);
+    ctx.stroke();
+  }
 
   ctx.shadowColor = rgba(COLORS.ring, ringAlpha * (0.25 + 0.2 * pulse) * growIn);
   ctx.shadowBlur = size * (0.008 + 0.01 * pulse);
