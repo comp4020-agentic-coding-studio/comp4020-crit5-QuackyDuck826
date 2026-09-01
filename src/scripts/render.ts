@@ -289,6 +289,14 @@ const NOODLE_RINGS: readonly NoodleRing[] = [
   { radiusFraction: 1.22, widthFraction: 0.05, ampScale: 0.8, freqScale: 0.65, speedScale: 0.35, phase: 5.2, hueOffset: 300, alpha: 0.1 },
 ];
 
+// Rings start switched off and reveal one at a time as the score climbs, so
+// the scene visibly fills in over a run instead of showing everything from
+// the first second. Each unlocks NOODLE_REVEAL_SCORE_STEP points after the
+// last (innermost first) and fades in over NOODLE_REVEAL_FADE_RANGE points
+// rather than popping in on the exact threshold.
+const NOODLE_REVEAL_SCORE_STEP = 100;
+const NOODLE_REVEAL_FADE_RANGE = 20;
+
 function drawNoodleRings(
   ctx: CanvasRenderingContext2D,
   state: GameState,
@@ -298,10 +306,14 @@ function drawNoodleRings(
 ) {
   if (alpha <= 0.02) return;
   ctx.save();
-  for (const ring of NOODLE_RINGS) {
+  for (let i = 0; i < NOODLE_RINGS.length; i++) {
+    const ring = NOODLE_RINGS[i];
+    const unlockScore = (i + 1) * NOODLE_REVEAL_SCORE_STEP;
+    const reveal = clamp((state.score - unlockScore) / NOODLE_REVEAL_FADE_RANGE, 0, 1);
+    if (reveal <= 0) continue;
     const hue = (state.time / NOODLE_HUE_PERIOD) * 360 + ring.hueOffset;
     const color = hslToRgb(hue, 0.55, 0.62);
-    ctx.strokeStyle = rgba(color, alpha * ring.alpha);
+    ctx.strokeStyle = rgba(color, alpha * ring.alpha * reveal);
     ctx.lineWidth = ringRadius * ring.widthFraction;
     traceWarpedCircle(
       ctx,
