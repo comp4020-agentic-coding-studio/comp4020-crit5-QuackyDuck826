@@ -1,5 +1,5 @@
 import { createInitialState, tick, handleInput } from "./game";
-import { render } from "./render";
+import { render, drawAmbientStars } from "./render";
 import { createAudioEngine } from "./audio";
 
 const audio = createAudioEngine();
@@ -11,6 +11,14 @@ const canvas: HTMLCanvasElement = canvasOrNull;
 const ctxOrNull = canvas.getContext("2d");
 if (!ctxOrNull) throw new Error("2d context unavailable");
 const ctx: CanvasRenderingContext2D = ctxOrNull;
+
+const bgCanvasOrNull = document.querySelector<HTMLCanvasElement>("#bg-stars");
+if (!bgCanvasOrNull) throw new Error("missing #bg-stars canvas");
+const bgCanvas: HTMLCanvasElement = bgCanvasOrNull;
+
+const bgCtxOrNull = bgCanvas.getContext("2d");
+if (!bgCtxOrNull) throw new Error("2d context unavailable");
+const bgCtx: CanvasRenderingContext2D = bgCtxOrNull;
 
 const highScoreLabel = document.querySelector<HTMLElement>("#high-score");
 const HIGH_SCORE_KEY = "orbit-reversal-dodge-high-score";
@@ -24,6 +32,9 @@ let state = createInitialState();
 let wasGameOver = false;
 let size = 0;
 
+let bgWidth = 0;
+let bgHeight = 0;
+
 function resize() {
   const dpr = window.devicePixelRatio || 1;
   size = Math.floor(Math.min(window.innerWidth, window.innerHeight));
@@ -32,6 +43,12 @@ function resize() {
   canvas.style.width = `${size}px`;
   canvas.style.height = `${size}px`;
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+  bgWidth = window.innerWidth;
+  bgHeight = window.innerHeight;
+  bgCanvas.width = Math.floor(bgWidth * dpr);
+  bgCanvas.height = Math.floor(bgHeight * dpr);
+  bgCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
 }
 window.addEventListener("resize", resize);
 resize();
@@ -83,6 +100,7 @@ function frame(now: number) {
 
   audio.tickMusic(Math.min(state.time, state.gameOverAt ?? state.time));
 
+  drawAmbientStars(bgCtx, state.time, bgWidth, bgHeight);
   render(ctx, state, size);
   requestAnimationFrame(frame);
 }

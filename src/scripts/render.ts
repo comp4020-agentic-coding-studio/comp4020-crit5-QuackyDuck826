@@ -108,17 +108,44 @@ function hash(n: number): number {
   return s - Math.floor(s);
 }
 
-function drawStars(ctx: CanvasRenderingContext2D, state: GameState, size: number) {
-  for (let i = 0; i < STAR_COUNT; i++) {
+function drawStarField(
+  ctx: CanvasRenderingContext2D,
+  time: number,
+  count: number,
+  width: number,
+  height: number,
+  scale: number,
+) {
+  for (let i = 0; i < count; i++) {
     const fx = hash(i * 1.618);
     const fy = hash(i * 2.718 + 4.2);
     const hue = hash(i * 3.14) * 360;
-    const twinkle = 0.5 + 0.5 * Math.sin(state.time * (0.5 + fx) + i * 3.1);
+    const twinkle = 0.5 + 0.5 * Math.sin(time * (0.5 + fx) + i * 3.1);
     ctx.fillStyle = rgba(hslToRgb(hue, 0.45, 0.82), 0.12 + twinkle * 0.35);
     ctx.beginPath();
-    ctx.arc(fx * size, fy * size, size * (0.0012 + fy * 0.0022), 0, Math.PI * 2);
+    ctx.arc(fx * width, fy * height, scale * (0.0012 + fy * 0.0022), 0, Math.PI * 2);
     ctx.fill();
   }
+}
+
+function drawStars(ctx: CanvasRenderingContext2D, state: GameState, size: number) {
+  drawStarField(ctx, state.time, STAR_COUNT, size, size, size);
+}
+
+// The game canvas is a centered square (it needs equal-radius orbit math), so
+// on a widescreen window there's letterboxed space to either side of it. This
+// draws the same star language across that full window rectangle on a
+// separate canvas behind the game one, so the margins aren't just flat bg.
+export function drawAmbientStars(
+  ctx: CanvasRenderingContext2D,
+  time: number,
+  width: number,
+  height: number,
+) {
+  ctx.clearRect(0, 0, width, height);
+  const scale = Math.min(width, height);
+  const count = Math.round(STAR_COUNT * ((width * height) / (scale * scale)));
+  drawStarField(ctx, time, count, width, height, scale);
 }
 
 // What everything else orbits: a shaded core whose own boundary and inner
