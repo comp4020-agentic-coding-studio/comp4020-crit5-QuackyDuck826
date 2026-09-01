@@ -658,6 +658,18 @@ function drawEffect(ctx: CanvasRenderingContext2D, effect: Effect, state: GameSt
   else drawLastSecondEffect(ctx, effect, state, center, ringRadius);
 }
 
+// The death-screen encouragement line reacts to how the run's score compares
+// to a fixed bar (the creator's own best), so it reads as commentary on this
+// particular run rather than a generic "try again" — softer as you approach
+// the bar, celebratory once you clear it.
+const CREATOR_BEST_SCORE = 500;
+
+function encouragementFor(score: number): string {
+  if (score > CREATOR_BEST_SCORE) return "you beat the creator's best score!";
+  if (score >= CREATOR_BEST_SCORE * 0.8) return "so close to the creator's best score...";
+  return "you can do better than that";
+}
+
 function drawScore(ctx: CanvasRenderingContext2D, state: GameState, size: number) {
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
@@ -705,9 +717,14 @@ function drawScore(ctx: CanvasRenderingContext2D, state: GameState, size: number
   const promptAlpha = clamp((elapsed - 0.9) / 0.4, 0, 1);
   if (promptAlpha <= 0) return;
   const promptPulse = 0.6 + 0.4 * Math.sin(state.time * 3);
+
+  ctx.font = `600 ${Math.round(size * 0.024)}px system-ui, sans-serif`;
+  ctx.fillStyle = rgba(COLORS.score, promptAlpha * 0.6);
+  ctx.fillText(encouragementFor(state.score), size / 2, size * 0.4 + fontSize * 0.65);
+
   ctx.font = `600 ${Math.round(size * 0.026)}px system-ui, sans-serif`;
   ctx.fillStyle = rgba(COLORS.score, promptAlpha * (0.45 + 0.4 * promptPulse));
-  ctx.fillText("tap to try again", size / 2, size * 0.4 + fontSize * 0.9);
+  ctx.fillText("tap to try again", size / 2, size * 0.4 + fontSize * 1.15);
 }
 
 // Right after a (re)start, the planet and orbit ring grow in from nothing
