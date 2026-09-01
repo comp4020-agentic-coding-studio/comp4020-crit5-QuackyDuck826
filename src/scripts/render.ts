@@ -658,16 +658,78 @@ function drawEffect(ctx: CanvasRenderingContext2D, effect: Effect, state: GameSt
   else drawLastSecondEffect(ctx, effect, state, center, ringRadius);
 }
 
+// A silly little confetti pop right where the player died — warped candy-
+// colored bubbles flung outward and falling, so a game over reads as a
+// party trick gone wrong instead of a flat freeze-frame.
+const DEATH_BURST_DURATION = 0.9;
+const DEATH_BURST_PARTICLES = 12;
+
+function drawDeathBurst(ctx: CanvasRenderingContext2D, state: GameState, center: number, ringRadius: number) {
+  if (!state.gameOver || state.gameOverAt == null) return;
+  const t = clamp((state.time - state.gameOverAt) / DEATH_BURST_DURATION, 0, 1);
+  if (t >= 1) return;
+  const fade = 1 - t;
+  const [x, y] = pointOn(center, ringRadius, state.playerAngle);
+
+  ctx.save();
+  for (let i = 0; i < DEATH_BURST_PARTICLES; i++) {
+    const seed = i * 7.31;
+    const angle = hash(seed) * Math.PI * 2;
+    const speed = 0.5 + hash(seed + 1) * 0.7;
+    const dist = ringRadius * speed * t;
+    const px = x + Math.cos(angle) * dist;
+    const py = y + Math.sin(angle) * dist + ringRadius * 0.18 * t * t;
+    const hue = hash(seed + 2) * 360;
+    const r = ringRadius * (0.014 + hash(seed + 3) * 0.018) * fade;
+    ctx.fillStyle = rgba(hslToRgb(hue, 0.7, 0.68), fade * 0.85);
+    ctx.beginPath();
+    ctx.arc(px, py, Math.max(0, r), 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.restore();
+}
+
 // The death-screen encouragement line reacts to how the run's score compares
 // to a fixed bar (the creator's own best), so it reads as commentary on this
 // particular run rather than a generic "try again" — softer as you approach
-// the bar, celebratory once you clear it.
+// the bar, celebratory once you clear it. A few playful variants per tier,
+// picked pseudo-randomly from the death moment, keep repeat deaths fresh.
 const CREATOR_BEST_SCORE = 500;
 
-function encouragementFor(score: number): string {
-  if (score > CREATOR_BEST_SCORE) return "you beat the creator's best score!";
-  if (score >= CREATOR_BEST_SCORE * 0.8) return "so close to the creator's best score...";
-  return "you can do better than that";
+const ENCOURAGEMENT_LOW = [
+  "you can do better than that",
+  "the void is unimpressed",
+  "eh, call that a warm-up",
+  "the orbit demands more",
+];
+const ENCOURAGEMENT_CLOSE = [
+  "so close to the creator's best score...",
+  "the creator is sweating a little",
+  "just a hair short of glory",
+];
+const ENCOURAGEMENT_WIN = [
+  "you beat the creator's best score!",
+  "new legend of the orbit!",
+  "the creator has been dethroned",
+];
+
+function encouragementFor(state: GameState): string {
+  const pool =
+    state.score > CREATOR_BEST_SCORE
+      ? ENCOURAGEMENT_WIN
+      : state.score >= CREATOR_BEST_SCORE * 0.8
+        ? ENCOURAGEMENT_CLOSE
+        : ENCOURAGEMENT_LOW;
+  const index = Math.floor(hash((state.gameOverAt ?? 0) * 3.7) * pool.length) % pool.length;
+  return pool[index];
+}
+
+// A gentle overshoot so the score pops into place with a bit of spring
+// rather than just growing linearly — playful rather than mechanical.
+function easeOutBack(t: number): number {
+  const c1 = 1.7;
+  const c3 = c1 + 1;
+  return 1 + c3 * Math.pow(t - 1, 3) + c1 * Math.pow(t - 1, 2);
 }
 
 function drawScore(ctx: CanvasRenderingContext2D, state: GameState, size: number) {
@@ -706,12 +768,20 @@ function drawScore(ctx: CanvasRenderingContext2D, state: GameState, size: number
   const elapsed = state.time - (state.gameOverAt ?? state.time);
   const growth = clamp((elapsed - 0.2) / 0.6, 0, 1);
   if (growth <= 0) return;
-  const fontSize = size * (0.028 + 0.09 * growth);
-  ctx.shadowColor = rgba(COLORS.score, 0.5 * growth);
+  const fontSize = size * 0.117;
+  const bounce = easeOutBack(growth);
+  const scoreHue = state.time * 50;
+  const scoreColor = hslToRgb(scoreHue, 0.65, 0.72);
+
+  ctx.save();
+  ctx.translate(size / 2, size * 0.4);
+  ctx.scale(bounce, bounce);
+  ctx.shadowColor = rgba(scoreColor, 0.55 * growth);
   ctx.shadowBlur = size * 0.03 * growth;
-  ctx.fillStyle = rgba(COLORS.score, 0.4 + 0.6 * growth);
+  ctx.fillStyle = rgba(scoreColor, 0.4 + 0.6 * growth);
   ctx.font = `700 ${Math.round(fontSize)}px system-ui, sans-serif`;
-  ctx.fillText(String(Math.floor(state.score)), size / 2, size * 0.4);
+  ctx.fillText(String(Math.floor(state.score)), 0, 0);
+  ctx.restore();
   ctx.shadowBlur = 0;
 
   const promptAlpha = clamp((elapsed - 0.9) / 0.4, 0, 1);
@@ -720,11 +790,16 @@ function drawScore(ctx: CanvasRenderingContext2D, state: GameState, size: number
 
   ctx.font = `600 ${Math.round(size * 0.024)}px system-ui, sans-serif`;
   ctx.fillStyle = rgba(COLORS.score, promptAlpha * 0.6);
-  ctx.fillText(encouragementFor(state.score), size / 2, size * 0.4 + fontSize * 0.65);
+  ctx.fillText(encouragementFor(state), size / 2, size * 0.4 + fontSize * 0.65);
 
+  const wiggle = Math.sin(state.time * 3) * 0.05;
+  ctx.save();
+  ctx.translate(size / 2, size * 0.4 + fontSize * 1.15);
+  ctx.rotate(wiggle);
   ctx.font = `600 ${Math.round(size * 0.026)}px system-ui, sans-serif`;
   ctx.fillStyle = rgba(COLORS.score, promptAlpha * (0.45 + 0.4 * promptPulse));
-  ctx.fillText("tap to try again", size / 2, size * 0.4 + fontSize * 1.15);
+  ctx.fillText("tap to try again", 0, 0);
+  ctx.restore();
 }
 
 // Right after a (re)start, the planet and orbit ring grow in from nothing
@@ -801,6 +876,7 @@ export function render(ctx: CanvasRenderingContext2D, state: GameState, size: nu
   if (ringAlpha > 0.02) {
     drawPlayer(ctx, state, center, ringRadius, ringAlpha);
   }
+  drawDeathBurst(ctx, state, center, ringRadius);
 
   for (const effect of state.effects) {
     drawEffect(ctx, effect, state, center, ringRadius);
