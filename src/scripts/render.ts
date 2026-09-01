@@ -257,14 +257,15 @@ function drawPlanet(ctx: CanvasRenderingContext2D, state: GameState, center: num
   ctx.restore();
 }
 
-// Ambient, thick, noodle-like rings warping in and out of the play area — one
-// tucked between the planet and the orbit path, two drifting past it toward
-// the canvas edge — sharing the planet's ripple language so the whole scene
-// reads as one living, wobbly thing rather than a rigid track with a blob in
-// the middle. Kept to just a few (fewer, bigger wobbles rather than a tangle
-// of thin curly ones) and each a distinctly different thickness, so they
-// read as a handful of fat cosmic noodles instead of clutter. Each ring
-// drifts through its own slow hue for a candy, many-colored feel.
+// Ambient, thick, noodle-like rings warping in and out of the play area —
+// two tucked inside the orbit path (one skinny, close to the line; one
+// fatter, closer to the planet), two drifting past it toward the canvas
+// edge — sharing the planet's ripple language so the whole scene reads as
+// one living, wobbly thing rather than a rigid track with a blob in the
+// middle. Kept to just a few (fewer, bigger wobbles rather than a tangle of
+// thin curly ones) and each a distinctly different thickness, so they read
+// as a handful of fat cosmic noodles instead of clutter. Each ring drifts
+// through its own slow hue for a candy, many-colored feel.
 const NOODLE_HUE_PERIOD = 30;
 
 interface NoodleRing {
@@ -276,6 +277,8 @@ interface NoodleRing {
   phase: number;
   hueOffset: number;
   alpha: number;
+  revealFrom: number; // score at which the ring starts fading in
+  revealTo: number; // score at which it's fully visible
 }
 
 // Each ring's max possible reach (radiusFraction * (1 + worst-case wobble) +
@@ -284,24 +287,28 @@ interface NoodleRing {
 // always sized to the smaller viewport dimension — so no noodle gets
 // clipped by the screen edge.
 const NOODLE_RINGS: readonly NoodleRing[] = [
-  { radiusFraction: 0.62, widthFraction: 0.09, ampScale: 1.4, freqScale: 0.55, speedScale: 0.5, phase: 0.6, hueOffset: 30, alpha: 0.14 },
-  { radiusFraction: 1.1, widthFraction: 0.22, ampScale: 1.15, freqScale: 0.45, speedScale: -0.4, phase: 3.1, hueOffset: 200, alpha: 0.13 },
-  { radiusFraction: 1.22, widthFraction: 0.05, ampScale: 0.8, freqScale: 0.65, speedScale: 0.35, phase: 5.2, hueOffset: 300, alpha: 0.1 },
+  { radiusFraction: 0.62, widthFraction: 0.09, ampScale: 1.4, freqScale: 0.55, speedScale: 0.5, phase: 0.6, hueOffset: 30, alpha: 0.14, revealFrom: 120, revealTo: 140 },
+  { radiusFraction: 1.1, widthFraction: 0.22, ampScale: 1.15, freqScale: 0.45, speedScale: -0.4, phase: 3.1, hueOffset: 200, alpha: 0.13, revealFrom: 200, revealTo: 220 },
+  { radiusFraction: 1.22, widthFraction: 0.05, ampScale: 0.8, freqScale: 0.65, speedScale: 0.35, phase: 5.2, hueOffset: 300, alpha: 0.1, revealFrom: 320, revealTo: 350 },
+  { radiusFraction: 0.85, widthFraction: 0.025, ampScale: 1.0, freqScale: 0.5, speedScale: 0.6, phase: 1.8, hueOffset: 140, alpha: 0.15, revealFrom: 450, revealTo: 480 },
 ];
 
 // Rings start switched off and reveal one at a time as the score climbs, so
 // the scene visibly fills in over a run instead of showing everything from
-// the first second. Each unlocks NOODLE_REVEAL_SCORE_STEP points after the
-// last (innermost first) and fades in over NOODLE_REVEAL_FADE_RANGE points
-// rather than popping in on the exact threshold.
-const NOODLE_REVEAL_SCORE_STEP = 100;
-const NOODLE_REVEAL_FADE_RANGE = 20;
+// the first second. Each ring fades in over its own [revealFrom, revealTo]
+// score window rather than popping in on an exact threshold.
+function revealFor(score: number, from: number, to: number): number {
+  return clamp((score - from) / (to - from), 0, 1);
+}
 
 // The soft glow band hugging the orbit line (drawn in render(), not part of
 // NOODLE_RINGS) joins the same build-up: hidden at the start, fading in
-// alongside the first noodle ring rather than being visible from frame one.
+// before the first noodle ring rather than being visible from frame one.
+const RING_GLOW_REVEAL_FROM = 50;
+const RING_GLOW_REVEAL_TO = 80;
+
 function ringGlowRevealFor(state: GameState): number {
-  return clamp((state.score - NOODLE_REVEAL_SCORE_STEP) / NOODLE_REVEAL_FADE_RANGE, 0, 1);
+  return revealFor(state.score, RING_GLOW_REVEAL_FROM, RING_GLOW_REVEAL_TO);
 }
 
 function drawNoodleRings(
@@ -315,8 +322,7 @@ function drawNoodleRings(
   ctx.save();
   for (let i = 0; i < NOODLE_RINGS.length; i++) {
     const ring = NOODLE_RINGS[i];
-    const unlockScore = (i + 1) * NOODLE_REVEAL_SCORE_STEP;
-    const reveal = clamp((state.score - unlockScore) / NOODLE_REVEAL_FADE_RANGE, 0, 1);
+    const reveal = revealFor(state.score, ring.revealFrom, ring.revealTo);
     if (reveal <= 0) continue;
     const hue = (state.time / NOODLE_HUE_PERIOD) * 360 + ring.hueOffset;
     const color = hslToRgb(hue, 0.55, 0.62);
