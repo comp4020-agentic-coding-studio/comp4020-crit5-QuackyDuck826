@@ -287,7 +287,7 @@ interface NoodleRing {
 // always sized to the smaller viewport dimension — so no noodle gets
 // clipped by the screen edge.
 const NOODLE_RINGS: readonly NoodleRing[] = [
-  { radiusFraction: 0.62, widthFraction: 0.09, ampScale: 1.4, freqScale: 0.55, speedScale: 0.5, phase: 0.6, hueOffset: 30, alpha: 0.14, revealFrom: 120, revealTo: 140 },
+  { radiusFraction: 0.62, widthFraction: 0.09, ampScale: 1.4, freqScale: 0.55, speedScale: 0.5, phase: 0.6, hueOffset: 30, alpha: 0.14, revealFrom: 50, revealTo: 80 },
   { radiusFraction: 1.1, widthFraction: 0.22, ampScale: 1.15, freqScale: 0.45, speedScale: -0.4, phase: 3.1, hueOffset: 200, alpha: 0.13, revealFrom: 200, revealTo: 220 },
   { radiusFraction: 1.22, widthFraction: 0.05, ampScale: 0.8, freqScale: 0.65, speedScale: 0.35, phase: 5.2, hueOffset: 300, alpha: 0.1, revealFrom: 320, revealTo: 350 },
   { radiusFraction: 0.85, widthFraction: 0.025, ampScale: 1.0, freqScale: 0.5, speedScale: 0.6, phase: 1.8, hueOffset: 140, alpha: 0.15, revealFrom: 450, revealTo: 480 },
@@ -303,9 +303,9 @@ function revealFor(score: number, from: number, to: number): number {
 
 // The soft glow band hugging the orbit line (drawn in render(), not part of
 // NOODLE_RINGS) joins the same build-up: hidden at the start, fading in
-// before the first noodle ring rather than being visible from frame one.
-const RING_GLOW_REVEAL_FROM = 50;
-const RING_GLOW_REVEAL_TO = 80;
+// just after the first noodle ring rather than being visible from frame one.
+const RING_GLOW_REVEAL_FROM = 120;
+const RING_GLOW_REVEAL_TO = 140;
 
 function ringGlowRevealFor(state: GameState): number {
   return revealFor(state.score, RING_GLOW_REVEAL_FROM, RING_GLOW_REVEAL_TO);
